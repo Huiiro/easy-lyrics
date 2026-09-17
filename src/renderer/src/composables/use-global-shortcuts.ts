@@ -20,7 +20,23 @@ export function useGlobalShortcuts(): void {
   const projectStore = useProjectStore()
 
   async function handleKeydown(event: KeyboardEvent): Promise<void> {
-    if (isEditableTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
+    if (isEditableTarget(event.target) || event.altKey) return
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const direction = event.key === 'ArrowLeft' ? -1 : 1
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault()
+        projectStore.nudgeActiveToken(direction * 0.001)
+        return
+      }
+      if (event.shiftKey) {
+        event.preventDefault()
+        projectStore.nudgeActiveToken(direction * 0.05)
+        return
+      }
+    }
+
+    if (event.metaKey || event.ctrlKey) return
 
     if (event.code === 'Space') {
       event.preventDefault()

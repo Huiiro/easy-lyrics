@@ -14,6 +14,7 @@ export const useTimelineStore = defineStore('timeline', () => {
   const pixelsPerSecond = ref(100)
   const width = ref(1)
   const selectedTokenId = ref<string | null>(null)
+  const snapGuideTime = ref<number | null>(null)
   const waveform = shallowRef<WaveformData | null>(null)
   const waveformLoading = ref(false)
   const waveformError = ref<string | null>(null)
@@ -78,6 +79,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     pixelsPerSecond,
     width,
     selectedTokenId,
+    snapGuideTime,
     waveform,
     waveformLoading,
     waveformError,

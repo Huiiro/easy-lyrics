@@ -35,7 +35,7 @@ onMounted(async () => {
     <header class="titlebar">
       <span class="brand-mark" aria-hidden="true" />
       <strong>Lyric Timeline</strong>
-      <span class="phase">Phase 3 · Timeline</span>
+      <span class="phase">Phase 4 · Timeline Edit</span>
     </header>
 
     <section class="workspace">

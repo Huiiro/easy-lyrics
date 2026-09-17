@@ -12,8 +12,16 @@ import {
   type AudioSource,
   type LyricLine,
   type LyricProject,
+  type LyricToken,
   type TokenizerMode
 } from '@shared/models/project'
+
+export interface TokenTimingUpdate {
+  lineIndex: number
+  tokenIndex: number
+  start: LyricToken['start']
+  end: LyricToken['end']
+}
 
 export const useProjectStore = defineStore('project', () => {
   const project = ref<LyricProject>(createEmptyProject())
@@ -109,6 +117,35 @@ export const useProjectStore = defineStore('project', () => {
     timingFinished.value = false
   }
 
+  function applyTokenTimingUpdates(updates: TokenTimingUpdate[]): void {
+    let changed = false
+    for (const update of updates) {
+      const token = project.value.lines[update.lineIndex]?.tokens[update.tokenIndex]
+      if (!token || (token.start === update.start && token.end === update.end)) continue
+      token.start = update.start
+      token.end = update.end
+      changed = true
+    }
+    if (!changed) return
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+  }
+
+  function nudgeActiveToken(delta: number): void {
+    const token = activeToken.value
+    if (!token || token.start === null || !Number.isFinite(delta)) return
+    const appliedDelta = Math.max(delta, -token.start)
+    applyTokenTimingUpdates([
+      {
+        lineIndex: currentLineIndex.value,
+        tokenIndex: currentTokenIndex.value,
+        start: token.start + appliedDelta,
+        end: token.end === null ? null : token.end + appliedDelta
+      }
+    ])
+  }
+
   function setTimingOffset(offsetMs: number): void {
     if (!Number.isFinite(offsetMs)) return
     project.value.settings.timingOffsetMs = Math.round(Math.min(Math.max(offsetMs, -5000), 5000))
@@ -132,6 +169,8 @@ export const useProjectStore = defineStore('project', () => {
     navigateLine,
     markCurrentToken,
     setTokenBoundary,
+    applyTokenTimingUpdates,
+    nudgeActiveToken,
     setTimingOffset
   }
 })

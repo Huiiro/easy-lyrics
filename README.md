@@ -4,7 +4,9 @@
 
 ## 当前状态
 
-Phase 3 时间轴基线：安全本地音频播放、歌词打轴、Canvas Timeline、动态刻度、播放头、波形、Token 块、Zoom/Pan 和点击 Seek 已经完成。
+Phase 4 时间轴编辑：安全本地音频播放、歌词打轴、Canvas Timeline、波形、Token 移动/缩放、相邻边界联动、整句移动、5 px 吸附和键盘微调已经完成。
+
+时间轴操作：拖动 Token 中部移动，拖动两侧白色 Handle 调整边界；默认联动相邻 Token，按住 `Alt` 临时解锁；`Ctrl/⌘ + ←/→` 微调 1 ms，`Shift + ←/→` 微调 50 ms。
 
 ## 开发环境
 

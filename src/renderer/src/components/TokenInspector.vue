@@ -115,6 +115,14 @@ function updateOffset(event: Event): void {
           <dt>↑ ↓</dt>
           <dd>上 / 下一行</dd>
         </div>
+        <div>
+          <dt>Ctrl/⌘ + ← →</dt>
+          <dd>微调 1 ms</dd>
+        </div>
+        <div>
+          <dt>Shift + ← →</dt>
+          <dd>微调 50 ms</dd>
+        </div>
       </dl>
     </div>
   </aside>

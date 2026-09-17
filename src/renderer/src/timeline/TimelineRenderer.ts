@@ -1,5 +1,6 @@
 import type { LyricLine } from '@shared/models/project'
 import type { WaveformData } from '@renderer/services/waveform'
+import { TimelineHitTester, type TimelineHitRegion } from '@renderer/timeline/TimelineHitTester'
 import { timeToX, type TimelineViewport } from '@renderer/timeline/viewport'
 
 export interface TimelineRenderState {
@@ -10,6 +11,7 @@ export interface TimelineRenderState {
   waveform: WaveformData | null
   lines: LyricLine[]
   activeTokenId: string | null
+  snapGuideTime: number | null
 }
 
 const rulerIntervals = [0.001, 0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300]
@@ -26,16 +28,26 @@ export function formatRulerLabel(time: number, interval: number): string {
 }
 
 export class TimelineRenderer {
+  private readonly hitTester = new TimelineHitTester()
+  private hitRegions: TimelineHitRegion[] = []
+
   constructor(private readonly context: CanvasRenderingContext2D) {}
 
   draw(state: TimelineRenderState): void {
     const { context } = this
+    this.hitRegions = []
     context.clearRect(0, 0, state.viewport.width, state.height)
     this.drawBackground(state)
     this.drawRuler(state)
     this.drawWaveform(state)
     this.drawTokens(state)
+    this.drawSnapGuide(state)
     this.drawPlayhead(state)
+    this.hitTester.setRegions(this.hitRegions)
+  }
+
+  hitTest(x: number, y: number): TimelineHitRegion | null {
+    return this.hitTester.hitTest(x, y)
   }
 
   private drawBackground(state: TimelineRenderState): void {
@@ -101,7 +113,9 @@ export class TimelineRenderer {
     const y = state.height - 42
     const height = 27
 
-    for (const line of state.lines) {
+    for (let lineIndex = 0; lineIndex < state.lines.length; lineIndex += 1) {
+      const line = state.lines[lineIndex]
+      if (!line) continue
       for (let index = 0; index < line.tokens.length; index += 1) {
         const token = line.tokens[index]
         if (!token || token.start === null) continue
@@ -113,6 +127,16 @@ export class TimelineRenderer {
 
         const width = Math.max(3, x2 - x1)
         const active = token.id === state.activeTokenId
+        this.hitRegions.push({
+          type: 'token-body',
+          id: token.id,
+          lineIndex,
+          tokenIndex: index,
+          x: x1,
+          y,
+          width,
+          height
+        })
         context.fillStyle = active ? '#72e4bd' : '#203d35'
         context.strokeStyle = active ? '#b4f8df' : '#3c7463'
         context.lineWidth = 1
@@ -132,8 +156,51 @@ export class TimelineRenderer {
           context.fillText(token.text, x1 + 6, y + height / 2)
           context.restore()
         }
+
+        if (active) {
+          const handleWidth = 8
+          context.fillStyle = '#e3fff5'
+          context.fillRect(x1 - handleWidth / 2, y + 3, handleWidth, height - 6)
+          context.fillRect(x2 - handleWidth / 2, y + 3, handleWidth, height - 6)
+          this.hitRegions.push(
+            {
+              type: 'token-left',
+              id: token.id,
+              lineIndex,
+              tokenIndex: index,
+              x: x1 - handleWidth,
+              y,
+              width: handleWidth * 2,
+              height
+            },
+            {
+              type: 'token-right',
+              id: token.id,
+              lineIndex,
+              tokenIndex: index,
+              x: x2 - handleWidth,
+              y,
+              width: handleWidth * 2,
+              height
+            }
+          )
+        }
       }
     }
+  }
+
+  private drawSnapGuide(state: TimelineRenderState): void {
+    if (state.snapGuideTime === null) return
+    const x = Math.round(timeToX(state.snapGuideTime, state.viewport)) + 0.5
+    const { context } = this
+    context.save()
+    context.strokeStyle = '#ffd166'
+    context.setLineDash([4, 3])
+    context.beginPath()
+    context.moveTo(x, 27)
+    context.lineTo(x, state.height)
+    context.stroke()
+    context.restore()
   }
 
   private drawPlayhead(state: TimelineRenderState): void {
@@ -153,5 +220,13 @@ export class TimelineRenderer {
     context.lineTo(x, 7)
     context.closePath()
     context.fill()
+    this.hitRegions.push({
+      type: 'playhead',
+      id: 'playhead',
+      x: x - 5,
+      y: 0,
+      width: 10,
+      height: state.height
+    })
   }
 }

@@ -295,6 +295,11 @@ button {
   color: #dce5ec;
   border-color: #52616d;
 }
+.timeline-actions button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(114, 228, 189, 0.14);
+}
 .timeline-canvas-wrap {
   position: relative;
   width: 100%;

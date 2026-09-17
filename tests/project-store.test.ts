@@ -75,4 +75,21 @@ describe('project store lyric selection', () => {
     store.setTokenBoundary('end', 1)
     expect(store.activeToken).toMatchObject({ start: 2, end: 2 })
   })
+
+  it('applies batch timing edits and nudges the active token', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+    store.applyTokenTimingUpdates([
+      { lineIndex: 0, tokenIndex: 0, start: 0.5, end: 1 },
+      { lineIndex: 0, tokenIndex: 1, start: 1, end: 1.5 }
+    ])
+
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { start: 0.5, end: 1 },
+      { start: 1, end: 1.5 }
+    ])
+
+    store.nudgeActiveToken(-0.6)
+    expect(store.activeToken).toMatchObject({ start: 0, end: 0.5 })
+  })
 })
