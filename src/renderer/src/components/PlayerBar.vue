@@ -35,12 +35,17 @@ onUnmounted(() => {
 })
 
 async function chooseAudio(): Promise<void> {
-  const selection = await window.desktopApi.selectAudio()
-  if (!selection) return
+  try {
+    if (!window.desktopApi) throw new Error('Preload bridge is unavailable')
+    const selection = await window.desktopApi.selectAudio()
+    if (!selection) return
 
-  projectStore.setAudio({ path: selection.path, name: selection.name, duration: null })
-  playerStore.beginLoad(selection.url, selection.name)
-  player.load(selection.url)
+    projectStore.setAudio({ path: selection.path, name: selection.name, duration: null })
+    playerStore.beginLoad(selection.url, selection.name)
+    player.load(selection.url)
+  } catch {
+    playerStore.fail('无法打开文件选择器，请重启应用后重试')
+  }
 }
 
 async function togglePlayback(): Promise<void> {

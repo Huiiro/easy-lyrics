@@ -51,7 +51,7 @@ function createWindow(): void {
     title: 'Lyric Timeline',
     backgroundColor: '#101318',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
