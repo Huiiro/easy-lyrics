@@ -16,8 +16,9 @@ const nextLine = computed(
 
 onMounted(async () => {
   try {
-    ipcStatus.value =
-      (await window.desktopApi.ping()) === 'pong' ? 'Main / Preload / Renderer 正常' : '响应异常'
+    const bridgeReady = (await window.desktopApi.ping()) === 'pong'
+    ipcStatus.value = bridgeReady ? 'Main / Preload / Renderer 正常' : '响应异常'
+    if (bridgeReady && import.meta.env.DEV) console.info('[Lyric Timeline] IPC bridge ready')
   } catch {
     ipcStatus.value = 'IPC 不可用'
   }

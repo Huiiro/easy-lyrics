@@ -14,6 +14,14 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        output: {
+          format: 'cjs',
+          entryFileNames: 'index.cjs'
+        }
+      }
+    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared')
