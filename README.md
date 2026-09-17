@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-Phase 2B 可用打轴基线：安全本地音频播放、歌词导入与 Tokenizer、Space/F/方向键工作流、Timing Offset 和 Token 时间编辑已经完成。
+Phase 3 时间轴基线：安全本地音频播放、歌词打轴、Canvas Timeline、动态刻度、播放头、波形、Token 块、Zoom/Pan 和点击 Seek 已经完成。
 
 ## 开发环境
 

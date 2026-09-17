@@ -11,7 +11,13 @@ const audioFiles = new Map<string, string>()
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'lyric-audio',
-    privileges: { secure: true, standard: true, stream: true, supportFetchAPI: true }
+    privileges: {
+      secure: true,
+      standard: true,
+      stream: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
   }
 ])
 
@@ -75,10 +81,15 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.lyric-timeline.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
-  protocol.handle('lyric-audio', (request) => {
+  protocol.handle('lyric-audio', async (request) => {
     const url = new URL(request.url)
     const path = url.hostname === 'media' ? audioFiles.get(url.pathname.slice(1)) : undefined
-    return path ? net.fetch(pathToFileURL(path).toString()) : new Response(null, { status: 404 })
+    if (!path) return new Response(null, { status: 404 })
+
+    const response = await net.fetch(pathToFileURL(path).toString(), { headers: request.headers })
+    const headers = new Headers(response.headers)
+    headers.set('Access-Control-Allow-Origin', '*')
+    return new Response(response.body, { status: response.status, headers })
   })
 
   registerIpcHandlers()
