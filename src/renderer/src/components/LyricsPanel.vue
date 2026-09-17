@@ -55,7 +55,10 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
             v-for="(token, tokenIndex) in line.tokens"
             :key="token.id"
             type="button"
-            :class="{ active: tokenIndex === projectStore.currentTokenIndex }"
+            :class="{
+              active: tokenIndex === projectStore.currentTokenIndex,
+              timed: token.start !== null
+            }"
             @click="projectStore.selectToken(lineIndex, tokenIndex)"
           >
             {{ token.text }}

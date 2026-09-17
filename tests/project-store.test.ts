@@ -45,4 +45,34 @@ describe('project store lyric selection', () => {
     store.selectToken(9, 9)
     expect(store.activeToken?.id).toBe('token-3')
   })
+
+  it('navigates tokens and lines without leaving valid bounds', () => {
+    const store = useProjectStore()
+    store.importLyrics(lines, 'smart')
+
+    store.navigateToken(1)
+    expect(store.activeToken?.id).toBe('token-2')
+    store.navigateToken(1)
+    expect(store.activeToken?.id).toBe('token-3')
+    store.navigateToken(1)
+    expect(store.activeToken?.id).toBe('token-3')
+
+    store.navigateLine(-1)
+    expect(store.activeToken?.id).toBe('token-1')
+  })
+
+  it('marks the current token and applies bounded project settings', () => {
+    const store = useProjectStore()
+    store.importLyrics(lines, 'smart')
+
+    store.markCurrentToken(1.25)
+    expect(store.project.lines[0]?.tokens[0]?.start).toBe(1.25)
+    expect(store.activeToken?.id).toBe('token-2')
+
+    store.setTimingOffset(9999)
+    expect(store.project.settings.timingOffsetMs).toBe(5000)
+    store.setTokenBoundary('start', 2)
+    store.setTokenBoundary('end', 1)
+    expect(store.activeToken).toMatchObject({ start: 2, end: 2 })
+  })
 })

@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-Phase 2A 歌词基线：安全本地音频播放、歌词粘贴导入、逐字/逐词/智能 Tokenizer、歌词状态面板与活动 Token 选择已经完成。
+Phase 2B 可用打轴基线：安全本地音频播放、歌词导入与 Tokenizer、Space/F/方向键工作流、Timing Offset 和 Token 时间编辑已经完成。
 
 ## 开发环境
 

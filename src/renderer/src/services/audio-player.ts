@@ -119,3 +119,10 @@ export class AudioPlayer {
     this.animationFrame = null
   }
 }
+
+let sharedPlayer: AudioPlayer | null = null
+
+export function getAudioPlayer(): AudioPlayer {
+  sharedPlayer ??= new AudioPlayer()
+  return sharedPlayer
+}

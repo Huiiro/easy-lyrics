@@ -3,12 +3,12 @@ import { computed, onMounted, onUnmounted } from 'vue'
 
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
-import { AudioPlayer } from '@renderer/services/audio-player'
+import { getAudioPlayer } from '@renderer/services/audio-player'
 import { formatTime } from '@renderer/utils/time'
 
 const playerStore = usePlayerStore()
 const projectStore = useProjectStore()
-const player = new AudioPlayer()
+const player = getAudioPlayer()
 let unsubscribe: (() => void) | null = null
 
 const progressMax = computed(() => Math.max(playerStore.duration, 0.001))

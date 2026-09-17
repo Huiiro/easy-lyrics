@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 
 import LyricsPanel from '@renderer/components/LyricsPanel.vue'
 import PlayerBar from '@renderer/components/PlayerBar.vue'
+import TokenInspector from '@renderer/components/TokenInspector.vue'
+import { useGlobalShortcuts } from '@renderer/composables/use-global-shortcuts'
 import { useProjectStore } from '@renderer/stores/project'
 
 const ipcStatus = ref('正在检查…')
@@ -13,6 +15,8 @@ const previousLine = computed(
 const nextLine = computed(
   () => projectStore.project.lines[projectStore.currentLineIndex + 1] ?? null
 )
+
+useGlobalShortcuts()
 
 onMounted(async () => {
   try {
@@ -30,7 +34,7 @@ onMounted(async () => {
     <header class="titlebar">
       <span class="brand-mark" aria-hidden="true" />
       <strong>Lyric Timeline</strong>
-      <span class="phase">Phase 2A · Lyrics</span>
+      <span class="phase">Phase 2B · Timing</span>
     </header>
 
     <section class="workspace">
@@ -47,12 +51,22 @@ onMounted(async () => {
                 v-for="(token, tokenIndex) in projectStore.activeLine.tokens"
                 :key="token.id"
                 type="button"
-                :class="{ active: tokenIndex === projectStore.currentTokenIndex }"
+                :class="{
+                  active: tokenIndex === projectStore.currentTokenIndex,
+                  timed: token.start !== null
+                }"
                 @click="projectStore.selectToken(projectStore.currentLineIndex, tokenIndex)"
               >
                 {{ token.text }}
               </button>
             </div>
+            <p class="timing-prompt" :class="{ complete: projectStore.timingFinished }">
+              {{
+                projectStore.timingFinished
+                  ? '打轴完成 · 最后一个 Token 已闭合'
+                  : '按 F 记录当前 Token'
+              }}
+            </p>
             <p class="context-line next">{{ nextLine?.text ?? '已经是最后一句' }}</p>
           </template>
 
@@ -71,23 +85,7 @@ onMounted(async () => {
           </div>
         </section>
 
-        <aside class="panel inspector-panel">
-          <p class="panel-label">工程</p>
-          <dl>
-            <div>
-              <dt>状态</dt>
-              <dd>{{ projectStore.project.lines.length ? '歌词已导入' : '等待歌词' }}</dd>
-            </div>
-            <div>
-              <dt>拆分方式</dt>
-              <dd>{{ projectStore.project.settings.tokenizer }}</dd>
-            </div>
-            <div>
-              <dt>Token</dt>
-              <dd>{{ projectStore.activeToken?.text ?? '—' }}</dd>
-            </div>
-          </dl>
-        </aside>
+        <TokenInspector />
       </div>
     </section>
 

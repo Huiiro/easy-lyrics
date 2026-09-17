@@ -184,6 +184,12 @@ button {
   color: #0b1613;
   background: #72e4bd;
 }
+.token-list button.timed:not(.active),
+.active-tokens button.timed:not(.active) {
+  border-color: #345d52;
+  color: #8fd8bf;
+  background: #16241f;
+}
 .stage {
   display: flex;
   flex-direction: column;
@@ -203,7 +209,15 @@ button {
   justify-content: center;
   gap: 6px;
   max-width: 760px;
-  margin: 24px 0 34px;
+  margin: 24px 0 14px;
+}
+.timing-prompt {
+  margin: 0 0 28px;
+  color: #687582;
+  font-size: 12px;
+}
+.timing-prompt.complete {
+  color: #72e4bd;
 }
 .active-tokens button {
   min-width: 34px;
@@ -273,6 +287,114 @@ h1 {
   margin: 5px 0 0;
   color: #c5ced7;
   font-size: 13px;
+}
+.inspector-token {
+  display: grid;
+  place-items: center;
+  min-height: 76px;
+  margin-bottom: 18px;
+  border: 1px solid #2f3b42;
+  border-radius: 9px;
+  color: #72e4bd;
+  background: #10171a;
+  font-size: 30px;
+  font-weight: 800;
+}
+.inspector-field {
+  display: block;
+  margin-bottom: 13px;
+}
+.inspector-field > span,
+.inspector-readout > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #74818d;
+  font-size: 11px;
+  font-weight: 700;
+}
+.inspector-field input {
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid #34404a;
+  border-radius: 6px;
+  outline: none;
+  color: #d9e1e8;
+  background: #10151a;
+  font:
+    12px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.inspector-field input:focus {
+  border-color: #72e4bd;
+}
+.inspector-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 18px;
+  color: #aeb8c1;
+  font-size: 12px;
+}
+.inspector-readout > span {
+  margin: 0;
+}
+.offset-field > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 7px;
+}
+.offset-field small {
+  color: #687582;
+}
+.inspector-error {
+  margin: -3px 0 12px;
+  color: #ff9ca4;
+  font-size: 11px;
+}
+.inspector-empty {
+  color: #687582;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.shortcut-card {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #2a323a;
+}
+.shortcut-card > p {
+  margin: 0 0 7px;
+  color: #687582;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.shortcut-card dl div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border: 0;
+}
+.shortcut-card dt {
+  padding: 3px 6px;
+  border: 1px solid #35404a;
+  border-radius: 4px;
+  color: #c7d0d8;
+  background: #11171c;
+  font:
+    10px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.shortcut-card dd {
+  margin: 0;
+  color: #73808c;
+  font-size: 11px;
 }
 .player-bar {
   position: relative;
