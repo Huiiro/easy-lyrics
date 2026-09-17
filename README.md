@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-Phase 0 工程基线：Electron、Vue 3、TypeScript、Vite、Pinia、IPC、安全隔离、代码规范与测试框架已经搭好。
+Phase 1 播放器基线：Electron、Vue 3、TypeScript、Vite、Pinia、安全 IPC、本地音频选择、播放/暂停、Seek、音量与倍速控制已经完成。
 
 ## 开发环境
 

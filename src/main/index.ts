@@ -1,9 +1,45 @@
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 
 import { IPC_CHANNELS } from '../shared/ipc'
+
+const audioFiles = new Map<string, string>()
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'lyric-audio',
+    privileges: { secure: true, standard: true, stream: true, supportFetchAPI: true }
+  }
+])
+
+function registerIpcHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
+  ipcMain.handle(IPC_CHANNELS.selectAudio, async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择音频',
+      properties: ['openFile'],
+      filters: [
+        { name: '音频文件', extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return null
+
+    const id = crypto.randomUUID()
+    audioFiles.set(id, path)
+
+    return {
+      path,
+      name: basename(path),
+      url: `lyric-audio://media/${id}`
+    }
+  })
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -39,7 +75,13 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.lyric-timeline.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
-  ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
+  protocol.handle('lyric-audio', (request) => {
+    const url = new URL(request.url)
+    const path = url.hostname === 'media' ? audioFiles.get(url.pathname.slice(1)) : undefined
+    return path ? net.fetch(pathToFileURL(path).toString()) : new Response(null, { status: 404 })
+  })
+
+  registerIpcHandlers()
   createWindow()
 
   app.on('activate', () => {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
+import PlayerBar from '@renderer/components/PlayerBar.vue'
+
 const ipcStatus = ref('正在检查…')
 
 onMounted(async () => {
@@ -18,20 +20,46 @@ onMounted(async () => {
     <header class="titlebar">
       <span class="brand-mark" aria-hidden="true" />
       <strong>Lyric Timeline</strong>
-      <span class="phase">Phase 0</span>
+      <span class="phase">Phase 1 · Player</span>
     </header>
 
     <section class="workspace">
-      <div class="empty-state">
-        <p class="eyebrow">逐字歌词打轴工具</p>
-        <h1>让每一个字，落在准确的拍点上。</h1>
-        <p class="lede">项目骨架已就绪。下一里程碑将接入音频播放器、歌词导入和连续打轴。</p>
-        <div class="actions">
-          <button type="button" disabled>新建工程</button>
-          <button class="secondary" type="button" disabled>打开工程</button>
-        </div>
+      <div class="workspace-grid">
+        <aside class="panel lyrics-panel">
+          <p class="panel-label">歌词</p>
+          <div class="panel-placeholder">Phase 2 将在这里导入和显示歌词</div>
+        </aside>
+
+        <section class="stage">
+          <p class="eyebrow">逐字歌词打轴工具</p>
+          <h1>先听见时间。</h1>
+          <p class="lede">从下方选择一首音频，验证播放、暂停、Seek、音量和变速。</p>
+          <div class="timeline-placeholder">
+            <span
+              v-for="index in 36"
+              :key="index"
+              :style="{ height: `${18 + ((index * 17) % 54)}%` }"
+            />
+          </div>
+        </section>
+
+        <aside class="panel inspector-panel">
+          <p class="panel-label">工程</p>
+          <dl>
+            <div>
+              <dt>状态</dt>
+              <dd>播放器阶段</dd>
+            </div>
+            <div>
+              <dt>下一步</dt>
+              <dd>歌词导入</dd>
+            </div>
+          </dl>
+        </aside>
       </div>
     </section>
+
+    <PlayerBar />
 
     <footer class="statusbar">
       <span class="status-dot" />

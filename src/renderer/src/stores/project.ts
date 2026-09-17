@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { createEmptyProject, type LyricProject } from '@shared/models/project'
+import { createEmptyProject, type AudioSource, type LyricProject } from '@shared/models/project'
 
 export const useProjectStore = defineStore('project', () => {
   const project = ref<LyricProject>(createEmptyProject())
@@ -9,5 +9,24 @@ export const useProjectStore = defineStore('project', () => {
   const currentTokenIndex = ref(0)
   const dirty = ref(false)
 
-  return { project, currentLineIndex, currentTokenIndex, dirty }
+  function setAudio(audio: AudioSource): void {
+    project.value.audio = audio
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+  }
+
+  function setAudioDuration(duration: number): void {
+    if (!project.value.audio) return
+    project.value.audio.duration = duration
+    project.value.updatedAt = Date.now()
+  }
+
+  return {
+    project,
+    currentLineIndex,
+    currentTokenIndex,
+    dirty,
+    setAudio,
+    setAudioDuration
+  }
 })
