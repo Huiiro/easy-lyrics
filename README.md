@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-Phase 1 播放器基线：Electron、Vue 3、TypeScript、Vite、Pinia、安全 IPC、本地音频选择、播放/暂停、Seek、音量与倍速控制已经完成。
+Phase 2A 歌词基线：安全本地音频播放、歌词粘贴导入、逐字/逐词/智能 Tokenizer、歌词状态面板与活动 Token 选择已经完成。
 
 ## 开发环境
 

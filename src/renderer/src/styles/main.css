@@ -62,7 +62,7 @@ button {
 }
 .workspace-grid {
   display: grid;
-  grid-template-columns: 230px minmax(420px, 1fr) 220px;
+  grid-template-columns: 320px minmax(420px, 1fr) 220px;
   gap: 12px;
   height: 100%;
 }
@@ -74,6 +74,8 @@ button {
 }
 .panel {
   padding: 16px;
+  min-height: 0;
+  overflow: hidden;
 }
 .panel-label {
   margin: 0 0 16px;
@@ -92,6 +94,96 @@ button {
   line-height: 1.7;
   text-align: center;
 }
+.panel-placeholder p {
+  margin: 0 0 12px;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-header .panel-label {
+  margin-bottom: 0;
+}
+.text-button,
+.icon-button {
+  border: 0;
+  color: #72e4bd;
+  background: transparent;
+  cursor: pointer;
+}
+.lyrics-panel {
+  display: flex;
+  flex-direction: column;
+  padding-right: 8px;
+}
+.lyrics-list {
+  margin: 14px 0 0;
+  padding: 0 8px 0 0;
+  list-style: none;
+  overflow: auto;
+}
+.lyrics-list > li {
+  margin-bottom: 3px;
+  border-radius: 7px;
+}
+.lyrics-list > li.active {
+  background: #1d292c;
+}
+.lyrics-list > li > button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  color: #9ca8b3;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.lyrics-list > li.active > button {
+  color: #e3eaf0;
+}
+.line-status {
+  color: #52606c;
+  text-align: center;
+}
+.line-status[data-status='partial'] {
+  color: #e0b25b;
+}
+.line-status[data-status='complete'] {
+  color: #72e4bd;
+}
+.line-text {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 10px 10px 37px;
+}
+.token-list button,
+.active-tokens button {
+  min-width: 24px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #82909d;
+  background: #11171c;
+  cursor: pointer;
+}
+.token-list button.active,
+.active-tokens button.active {
+  border-color: #72e4bd;
+  color: #0b1613;
+  background: #72e4bd;
+}
 .stage {
   display: flex;
   flex-direction: column;
@@ -100,6 +192,32 @@ button {
   min-width: 0;
   padding: 36px;
   text-align: center;
+}
+.active-line {
+  max-width: 760px;
+  font-size: clamp(30px, 4vw, 52px);
+}
+.active-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 760px;
+  margin: 24px 0 34px;
+}
+.active-tokens button {
+  min-width: 34px;
+  padding: 7px 9px;
+  font-size: 15px;
+}
+.context-line {
+  min-height: 24px;
+  margin: 0 0 28px;
+  color: #586573;
+  font-size: 15px;
+}
+.context-line.next {
+  margin: 0;
 }
 .eyebrow {
   margin: 0 0 12px;
@@ -250,6 +368,122 @@ input[type='range'] {
   color: #ffc2c7;
   background: #351d20;
   font-size: 12px;
+}
+.secondary-button,
+.primary-button {
+  padding: 8px 14px;
+  border: 1px solid #3a4652;
+  border-radius: 7px;
+  color: #cad3dc;
+  background: #1a2028;
+  font-weight: 700;
+  cursor: pointer;
+}
+.primary-button {
+  border-color: #72e4bd;
+  color: #0d1714;
+  background: #72e4bd;
+}
+.primary-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgb(3 6 9 / 76%);
+  backdrop-filter: blur(8px);
+}
+.import-dialog {
+  width: min(680px, 100%);
+  padding: 22px;
+  border: 1px solid #39444f;
+  border-radius: 12px;
+  background: #171c22;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+}
+.dialog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.dialog-header .eyebrow {
+  margin-bottom: 5px;
+}
+.dialog-header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+.icon-button {
+  padding: 0 4px;
+  color: #87939f;
+  font-size: 27px;
+}
+.field-label,
+.tokenizer-options legend {
+  color: #8995a1;
+  font-size: 12px;
+  font-weight: 700;
+}
+.import-dialog textarea {
+  width: 100%;
+  margin: 8px 0 16px;
+  padding: 13px;
+  resize: vertical;
+  border: 1px solid #35404a;
+  border-radius: 8px;
+  outline: none;
+  color: #e2e9ef;
+  background: #0f1419;
+  font:
+    14px/1.7 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.import-dialog textarea:focus {
+  border-color: #72e4bd;
+  box-shadow: 0 0 0 2px rgb(114 228 189 / 13%);
+}
+.tokenizer-options {
+  display: flex;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.tokenizer-options legend {
+  margin-bottom: 9px;
+}
+.tokenizer-options label {
+  color: #c8d0d8;
+  font-size: 13px;
+}
+.tokenizer-options input {
+  accent-color: #72e4bd;
+}
+.tokenizer-hint {
+  margin: 12px 0 20px;
+  color: #687582;
+  font-size: 12px;
+}
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  border-top: 1px solid #2b333c;
+  color: #74818d;
+  font-size: 12px;
+}
+.dialog-footer > div {
+  display: flex;
+  gap: 8px;
 }
 .statusbar {
   display: flex;

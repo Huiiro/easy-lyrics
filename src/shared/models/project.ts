@@ -25,8 +25,10 @@ export interface ProjectMetadata {
 
 export interface ProjectSettings {
   timingOffsetMs: number
-  tokenizer: 'char' | 'word' | 'smart'
+  tokenizer: TokenizerMode
 }
+
+export type TokenizerMode = 'char' | 'word' | 'smart'
 
 export interface LyricProject {
   version: 1
