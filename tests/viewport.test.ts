@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  followViewportToTime,
   panViewportByPixels,
   timeToX,
   xToTime,
@@ -29,5 +30,16 @@ describe('timeline viewport transforms', () => {
     expect(panViewportByPixels(viewport, -200, 120).startTime).toBe(12)
     expect(panViewportByPixels(viewport, 5000, 120).startTime).toBe(0)
     expect(panViewportByPixels(viewport, -50_000, 20).startTime).toBe(12)
+  })
+
+  it('pages forward when playback crosses the visible edge', () => {
+    expect(followViewportToTime(viewport, 17.99, 120).startTime).toBe(10)
+    expect(followViewportToTime(viewport, 18, 120).startTime).toBe(18)
+    expect(followViewportToTime(viewport, 35, 120).startTime).toBe(34)
+  })
+
+  it('pages backward and clamps the last playback page', () => {
+    expect(followViewportToTime(viewport, 2, 120).startTime).toBe(0)
+    expect(followViewportToTime(viewport, 119, 120).startTime).toBe(112)
   })
 })

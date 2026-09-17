@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { tokenizeLine } from '@renderer/services/tokenizer'
+import BaseDialog from '@renderer/components/ui/BaseDialog.vue'
+import { parseLyricSource, tokenizeLine } from '@renderer/services/tokenizer'
 import type { TokenizerMode } from '@shared/models/project'
 
 const props = defineProps<{ open: boolean }>()
@@ -15,11 +16,7 @@ const mode = ref<TokenizerMode>('smart')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 
 const preview = computed(() => {
-  const lines = text.value
-    .replace(/\r\n?/gu, '\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+  const lines = parseLyricSource(text.value).map((line) => line.text)
   return {
     lines: lines.filter((line) => tokenizeLine(line, mode.value).length > 0).length,
     tokens: lines.reduce((total, line) => total + tokenizeLine(line, mode.value).length, 0)
@@ -41,14 +38,8 @@ function submit(): void {
 </script>
 
 <template>
-  <div v-if="open" class="dialog-backdrop" role="presentation" @mousedown.self="emit('close')">
-    <section
-      class="import-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="lyrics-import-title"
-      @keydown.esc="emit('close')"
-    >
+  <BaseDialog :open="open" title-id="lyrics-import-title" @close="emit('close')">
+    <div class="import-dialog">
       <header class="dialog-header">
         <div>
           <p class="eyebrow">Lyrics</p>
@@ -75,7 +66,9 @@ function submit(): void {
         <label><input v-model="mode" type="radio" value="word" /> 逐词</label>
       </fieldset>
 
-      <p class="tokenizer-hint">智能模式按中文字、英文单词和数字拆分；空行及纯标点行会忽略。</p>
+      <p class="tokenizer-hint">
+        支持普通文本和 LRC 时间标签；智能模式按中文字、英文单词和数字拆分。
+      </p>
 
       <footer class="dialog-footer">
         <span>{{ preview.lines }} 行 · {{ preview.tokens }} 个 Token</span>
@@ -91,6 +84,6 @@ function submit(): void {
           </button>
         </div>
       </footer>
-    </section>
-  </div>
+    </div>
+  </BaseDialog>
 </template>

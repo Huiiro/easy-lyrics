@@ -1,9 +1,9 @@
 import { basename, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 
+import { createAudioResponse } from './audio-response'
 import { IPC_CHANNELS } from '../shared/ipc'
 
 const audioFiles = new Map<string, string>()
@@ -86,10 +86,11 @@ app.whenReady().then(() => {
     const path = url.hostname === 'media' ? audioFiles.get(url.pathname.slice(1)) : undefined
     if (!path) return new Response(null, { status: 404 })
 
-    const response = await net.fetch(pathToFileURL(path).toString(), { headers: request.headers })
-    const headers = new Headers(response.headers)
-    headers.set('Access-Control-Allow-Origin', '*')
-    return new Response(response.body, { status: response.status, headers })
+    try {
+      return await createAudioResponse(path, request.headers.get('range'))
+    } catch {
+      return new Response(null, { status: 404 })
+    }
   })
 
   registerIpcHandlers()

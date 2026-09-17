@@ -46,6 +46,21 @@ describe('project store lyric selection', () => {
     expect(store.activeToken?.id).toBe('token-3')
   })
 
+  it('clears the token selection without losing the current lyric line', () => {
+    const store = useProjectStore()
+    store.importLyrics(lines, 'smart')
+
+    store.clearTokenSelection()
+
+    expect(store.activeToken).toBeNull()
+    expect(store.activeLine?.id).toBe('line-1')
+    store.nudgeActiveToken(0.1)
+    expect(store.project.lines[0]?.tokens[0]?.start).toBeNull()
+
+    store.selectToken(0, 1)
+    expect(store.activeToken?.id).toBe('token-2')
+  })
+
   it('navigates tokens and lines without leaving valid bounds', () => {
     const store = useProjectStore()
     store.importLyrics(lines, 'smart')
@@ -91,5 +106,33 @@ describe('project store lyric selection', () => {
 
     store.nudgeActiveToken(-0.6)
     expect(store.activeToken).toMatchObject({ start: 0, end: 0.5 })
+  })
+
+  it('nudges according to token lock and line edit modes', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+    store.applyTokenTimingUpdates([
+      { lineIndex: 0, tokenIndex: 0, start: 1, end: 2 },
+      { lineIndex: 0, tokenIndex: 1, start: 2, end: 3 }
+    ])
+
+    store.selectToken(0, 1)
+    store.nudgeSelection(0.1, 'token', false)
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { start: 1, end: 2 },
+      { start: 2.1, end: 3.1 }
+    ])
+
+    store.nudgeSelection(0.1, 'token', true)
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { start: 1, end: 2.2 },
+      { start: 2.2, end: 3.2 }
+    ])
+
+    store.nudgeSelection(0.2, 'line', true)
+    expect(store.project.lines[0]?.tokens[0]?.start).toBeCloseTo(1.2)
+    expect(store.project.lines[0]?.tokens[0]?.end).toBeCloseTo(2.4)
+    expect(store.project.lines[0]?.tokens[1]?.start).toBeCloseTo(2.4)
+    expect(store.project.lines[0]?.tokens[1]?.end).toBeCloseTo(3.4)
   })
 })

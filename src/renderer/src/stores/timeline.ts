@@ -4,12 +4,16 @@ import { computed, ref, shallowRef } from 'vue'
 import type { WaveformData } from '@renderer/services/waveform'
 import {
   clampStartTime,
+  followViewportToTime,
   panViewportByPixels,
   zoomViewportAt,
   type TimelineViewport
 } from '@renderer/timeline/viewport'
 
 export const useTimelineStore = defineStore('timeline', () => {
+  const editMode = ref<'token' | 'line'>('token')
+  const adjacentLocked = ref(true)
+  const followPlayback = ref(true)
   const startTime = ref(0)
   const pixelsPerSecond = ref(100)
   const width = ref(1)
@@ -41,6 +45,10 @@ export const useTimelineStore = defineStore('timeline', () => {
 
   function panByPixels(deltaPixels: number, duration: number): void {
     applyViewport(panViewportByPixels(viewport.value, deltaPixels, duration))
+  }
+
+  function followTime(time: number, duration: number): void {
+    applyViewport(followViewportToTime(viewport.value, time, duration))
   }
 
   function fit(duration: number): void {
@@ -75,6 +83,9 @@ export const useTimelineStore = defineStore('timeline', () => {
   }
 
   return {
+    editMode,
+    adjacentLocked,
+    followPlayback,
     startTime,
     pixelsPerSecond,
     width,
@@ -87,6 +98,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     setWidth,
     zoomAt,
     panByPixels,
+    followTime,
     fit,
     beginWaveformLoad,
     setWaveform,

@@ -57,3 +57,24 @@ export function panViewportByPixels(
   next.startTime = clampStartTime(next.startTime, next, duration)
   return next
 }
+
+export function followViewportToTime(
+  viewport: TimelineViewport,
+  time: number,
+  duration: number
+): TimelineViewport {
+  const visibleDuration = viewport.width / viewport.pixelsPerSecond
+  const endTime = viewport.startTime + visibleDuration
+  if (time >= viewport.startTime && time < endTime) return viewport
+
+  const next = {
+    ...viewport,
+    startTime:
+      time < viewport.startTime
+        ? Math.floor(Math.max(time, 0) / visibleDuration) * visibleDuration
+        : viewport.startTime +
+          Math.max(1, Math.floor((time - viewport.startTime) / visibleDuration)) * visibleDuration
+  }
+  next.startTime = clampStartTime(next.startTime, next, duration)
+  return next
+}

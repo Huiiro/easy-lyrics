@@ -7,6 +7,36 @@ export interface Tokenizer {
 const spokenCharacterPattern = /[\p{L}\p{M}\p{N}]/u
 const smartTokenPattern = /\p{Script=Han}|[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu
 const boundaryPunctuationPattern = /^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu
+const lrcTimestampPattern = /\[(\d+):([0-5]?\d)(?:[.:](\d{1,3}))?\]/gu
+const lrcMetadataPattern = /^\[(?:ar|al|ti|au|by|offset|re|ve|length):.*\]$/iu
+
+export interface ParsedLyricSourceLine {
+  text: string
+  start: number | null
+}
+
+function timestampToSeconds(minutes: string, seconds: string, fraction = ''): number {
+  const fractionSeconds = fraction ? Number(fraction) / 10 ** fraction.length : 0
+  return Number(minutes) * 60 + Number(seconds) + fractionSeconds
+}
+
+export function parseLyricSource(source: string): ParsedLyricSourceLine[] {
+  return source
+    .replace(/\r\n?/gu, '\n')
+    .split('\n')
+    .flatMap((rawLine): ParsedLyricSourceLine[] => {
+      const line = rawLine.trim().replace(/^\uFEFF/u, '')
+      if (!line || lrcMetadataPattern.test(line)) return []
+
+      const starts = Array.from(line.matchAll(lrcTimestampPattern), (match) =>
+        timestampToSeconds(match[1] ?? '0', match[2] ?? '0', match[3])
+      )
+      const text = line.replace(lrcTimestampPattern, '').trim()
+      if (!text) return []
+      if (starts.length === 0) return [{ text, start: null }]
+      return starts.map((start) => ({ text, start }))
+    })
+}
 
 export const charTokenizer: Tokenizer = {
   tokenize(text) {
@@ -45,19 +75,15 @@ export function createLyricLines(
   mode: TokenizerMode,
   createId: () => string = () => crypto.randomUUID()
 ): LyricLine[] {
-  return source
-    .replace(/\r\n?/gu, '\n')
-    .split('\n')
-    .map((text) => text.trim())
-    .filter(Boolean)
-    .map((text): LyricLine | null => {
+  return parseLyricSource(source)
+    .map(({ text, start }): LyricLine | null => {
       const tokenTexts = tokenizeLine(text, mode)
       if (tokenTexts.length === 0) return null
 
-      const tokens: LyricToken[] = tokenTexts.map((tokenText) => ({
+      const tokens: LyricToken[] = tokenTexts.map((tokenText, index) => ({
         id: createId(),
         text: tokenText,
-        start: null,
+        start: index === 0 ? start : null,
         end: null
       }))
 

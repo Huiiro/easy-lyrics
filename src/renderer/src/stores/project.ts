@@ -7,6 +7,7 @@ import {
   previousCursor,
   type TokenCursor
 } from '@renderer/services/timing'
+import { MIN_TOKEN_DURATION } from '@renderer/timeline/editing'
 import {
   createEmptyProject,
   type AudioSource,
@@ -27,10 +28,13 @@ export const useProjectStore = defineStore('project', () => {
   const project = ref<LyricProject>(createEmptyProject())
   const currentLineIndex = ref(0)
   const currentTokenIndex = ref(0)
+  const tokenSelected = ref(true)
   const dirty = ref(false)
   const timingFinished = ref(false)
   const activeLine = computed(() => project.value.lines[currentLineIndex.value] ?? null)
-  const activeToken = computed(() => activeLine.value?.tokens[currentTokenIndex.value] ?? null)
+  const activeToken = computed(() =>
+    tokenSelected.value ? (activeLine.value?.tokens[currentTokenIndex.value] ?? null) : null
+  )
 
   function setAudio(audio: AudioSource): void {
     project.value.audio = audio
@@ -50,6 +54,7 @@ export const useProjectStore = defineStore('project', () => {
     project.value.updatedAt = Date.now()
     currentLineIndex.value = 0
     currentTokenIndex.value = 0
+    tokenSelected.value = lines.length > 0
     timingFinished.value = false
     dirty.value = true
   }
@@ -59,6 +64,12 @@ export const useProjectStore = defineStore('project', () => {
     if (!line || !line.tokens[tokenIndex]) return
     currentLineIndex.value = lineIndex
     currentTokenIndex.value = tokenIndex
+    tokenSelected.value = true
+    timingFinished.value = false
+  }
+
+  function clearTokenSelection(): void {
+    tokenSelected.value = false
     timingFinished.value = false
   }
 
@@ -74,6 +85,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!cursor) return
     currentLineIndex.value = cursor.lineIndex
     currentTokenIndex.value = cursor.tokenIndex
+    tokenSelected.value = true
     timingFinished.value = false
   }
 
@@ -87,10 +99,12 @@ export const useProjectStore = defineStore('project', () => {
     if (!line?.tokens.length) return
     currentLineIndex.value = lineIndex
     currentTokenIndex.value = Math.min(currentTokenIndex.value, line.tokens.length - 1)
+    tokenSelected.value = true
     timingFinished.value = false
   }
 
   function markCurrentToken(time: number): void {
+    if (!activeToken.value) return
     const result = markTokenAtTime(project.value.lines, currentCursor(), time)
     if (!result) return
     currentLineIndex.value = result.cursor.lineIndex
@@ -146,6 +160,70 @@ export const useProjectStore = defineStore('project', () => {
     ])
   }
 
+  function nudgeSelection(delta: number, mode: 'token' | 'line', adjacentLocked: boolean): void {
+    const token = activeToken.value
+    const line = activeLine.value
+    if (!token || !line || token.start === null || !Number.isFinite(delta)) return
+
+    if (mode === 'line') {
+      const timedTokens = line.tokens.filter((item) => item.start !== null)
+      if (timedTokens.length === 0) return
+      const firstStart = Math.min(...timedTokens.map((item) => item.start ?? 0))
+      const appliedDelta = Math.max(delta, -firstStart)
+      applyTokenTimingUpdates(
+        line.tokens.map((item, tokenIndex) => ({
+          lineIndex: currentLineIndex.value,
+          tokenIndex,
+          start: item.start === null ? null : item.start + appliedDelta,
+          end: item.end === null ? null : item.end + appliedDelta
+        }))
+      )
+      return
+    }
+
+    if (!adjacentLocked) {
+      nudgeActiveToken(delta)
+      return
+    }
+
+    const previous = line.tokens[currentTokenIndex.value - 1]
+    const next = line.tokens[currentTokenIndex.value + 1]
+    let appliedDelta = Math.max(delta, -token.start)
+    if (previous?.start !== null && previous?.start !== undefined) {
+      appliedDelta = Math.max(appliedDelta, previous.start + MIN_TOKEN_DURATION - token.start)
+    }
+    if (token.end !== null && next?.end !== null && next?.end !== undefined) {
+      appliedDelta = Math.min(appliedDelta, next.end - MIN_TOKEN_DURATION - token.end)
+    }
+    const start = token.start + appliedDelta
+    const end = token.end === null ? null : token.end + appliedDelta
+    const updates: TokenTimingUpdate[] = [
+      {
+        lineIndex: currentLineIndex.value,
+        tokenIndex: currentTokenIndex.value,
+        start,
+        end
+      }
+    ]
+    if (previous?.start !== null && previous?.start !== undefined) {
+      updates.push({
+        lineIndex: currentLineIndex.value,
+        tokenIndex: currentTokenIndex.value - 1,
+        start: previous.start,
+        end: start
+      })
+    }
+    if (end !== null && next?.start !== null && next?.start !== undefined) {
+      updates.push({
+        lineIndex: currentLineIndex.value,
+        tokenIndex: currentTokenIndex.value + 1,
+        start: end,
+        end: next.end
+      })
+    }
+    applyTokenTimingUpdates(updates)
+  }
+
   function setTimingOffset(offsetMs: number): void {
     if (!Number.isFinite(offsetMs)) return
     project.value.settings.timingOffsetMs = Math.round(Math.min(Math.max(offsetMs, -5000), 5000))
@@ -165,12 +243,14 @@ export const useProjectStore = defineStore('project', () => {
     setAudioDuration,
     importLyrics,
     selectToken,
+    clearTokenSelection,
     navigateToken,
     navigateLine,
     markCurrentToken,
     setTokenBoundary,
     applyTokenTimingUpdates,
     nudgeActiveToken,
+    nudgeSelection,
     setTimingOffset
   }
 })

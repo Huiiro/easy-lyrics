@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-
-import LyricsImportDialog from '@renderer/components/LyricsImportDialog.vue'
-import { createLyricLines } from '@renderer/services/tokenizer'
+import { getAudioPlayer } from '@renderer/services/audio-player'
 import { useProjectStore } from '@renderer/stores/project'
-import { getLineTimingStatus } from '@renderer/utils/lyrics'
-import type { TokenizerMode } from '@shared/models/project'
+import { formatTime } from '@renderer/utils/time'
+import { getLineStart, getLineTimingStatus } from '@renderer/utils/lyrics'
+import type { LyricLine, LyricToken } from '@shared/models/project'
 
 const projectStore = useProjectStore()
-const importOpen = ref(false)
+const player = getAudioPlayer()
+const emit = defineEmits<{ requestImport: [] }>()
 
 const statusSymbol = {
   pending: '○',
@@ -16,8 +15,18 @@ const statusSymbol = {
   complete: '●'
 } as const
 
-function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
-  projectStore.importLyrics(createLyricLines(payload.text, payload.mode), payload.mode)
+function seekTo(time: number | null): void {
+  if (time !== null) player.seek(time)
+}
+
+function selectLine(line: LyricLine, lineIndex: number): void {
+  projectStore.selectToken(lineIndex, 0)
+  seekTo(getLineStart(line))
+}
+
+function selectToken(token: LyricToken, lineIndex: number, tokenIndex: number): void {
+  projectStore.selectToken(lineIndex, tokenIndex)
+  seekTo(token.start)
 }
 </script>
 
@@ -25,7 +34,7 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
   <aside class="panel lyrics-panel">
     <header class="panel-header">
       <p class="panel-label">歌词</p>
-      <button class="text-button" type="button" @click="importOpen = true">
+      <button class="text-button" type="button" @click="emit('requestImport')">
         {{ projectStore.project.lines.length ? '重新导入' : '导入' }}
       </button>
     </header>
@@ -33,7 +42,9 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
     <div v-if="projectStore.project.lines.length === 0" class="panel-placeholder">
       <div>
         <p>还没有歌词</p>
-        <button class="secondary-button" type="button" @click="importOpen = true">粘贴歌词</button>
+        <button class="secondary-button" type="button" @click="emit('requestImport')">
+          粘贴歌词
+        </button>
       </div>
     </div>
 
@@ -43,10 +54,21 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
         :key="line.id"
         :class="{ active: lineIndex === projectStore.currentLineIndex }"
       >
-        <button type="button" @click="projectStore.selectToken(lineIndex, 0)">
+        <button
+          type="button"
+          :title="
+            getLineStart(line) === null
+              ? '该行尚未打轴'
+              : `定位到 ${formatTime(getLineStart(line)!)}`
+          "
+          @click="selectLine(line, lineIndex)"
+        >
           <span class="line-status" :data-status="getLineTimingStatus(line)">
             {{ statusSymbol[getLineTimingStatus(line)] }}
           </span>
+          <time class="line-time">
+            {{ getLineStart(line) === null ? '--:--.---' : formatTime(getLineStart(line)!) }}
+          </time>
           <span class="line-text">{{ line.text }}</span>
         </button>
 
@@ -56,17 +78,20 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
             :key="token.id"
             type="button"
             :class="{
-              active: tokenIndex === projectStore.currentTokenIndex,
+              active:
+                projectStore.activeToken !== null && tokenIndex === projectStore.currentTokenIndex,
               timed: token.start !== null
             }"
-            @click="projectStore.selectToken(lineIndex, tokenIndex)"
+            :title="
+              token.start === null ? '该 Token 尚未打轴' : `定位到 ${formatTime(token.start)}`
+            "
+            @click="selectToken(token, lineIndex, tokenIndex)"
           >
-            {{ token.text }}
+            <span>{{ token.text }}</span>
+            <time>{{ token.start === null ? '—' : formatTime(token.start) }}</time>
           </button>
         </div>
       </li>
     </ol>
-
-    <LyricsImportDialog :open="importOpen" @close="importOpen = false" @import="importLyrics" />
   </aside>
 </template>

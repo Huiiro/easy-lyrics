@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 
+import PlayerBar from '@renderer/components/PlayerBar.vue'
 import { getAudioPlayer } from '@renderer/services/audio-player'
 import { decodeWaveform } from '@renderer/services/waveform'
 import { usePlayerStore } from '@renderer/stores/player'
@@ -18,11 +19,11 @@ import {
 } from '@renderer/timeline/editing'
 import { TimelineRenderer } from '@renderer/timeline/TimelineRenderer'
 import { xToTime } from '@renderer/timeline/viewport'
+import { MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from '@renderer/timeline/viewport'
 
-const HEIGHT = 190
 const canvas = ref<HTMLCanvasElement | null>(null)
 const container = ref<HTMLElement | null>(null)
-const editMode = ref<'token' | 'line'>('token')
+const canvasHeight = ref(190)
 
 type Interaction =
   | { kind: 'seek' }
@@ -111,7 +112,7 @@ function previewEdit(
   const lineTokens = edit.snapshots.filter((token) => token.lineIndex === edit.lineIndex)
   const previous = lineTokens.find((token) => token.tokenIndex === edit.tokenIndex - 1)
   const next = lineTokens.find((token) => token.tokenIndex === edit.tokenIndex + 1)
-  const linked = !event.altKey
+  const linked = timelineStore.adjacentLocked && !event.altKey
   const targetEnd = target.end ?? next?.start ?? target.start + 0.12
   const excluded = new Set(
     edit.kind === 'line-move' ? lineTokens.map((token) => token.id) : [target.id]
@@ -205,6 +206,7 @@ function handlePointerDown(event: PointerEvent): void {
   if (!canvas.value || !playerStore.source) return
   const x = pointerX(event)
   if (event.button === 1 || (event.button === 0 && event.shiftKey)) {
+    timelineStore.followPlayback = false
     interaction = { kind: 'pan', lastX: x }
   } else if (event.button === 0) {
     const hit = renderer?.hitTest(x, event.clientY - canvas.value.getBoundingClientRect().top)
@@ -216,7 +218,7 @@ function handlePointerDown(event: PointerEvent): void {
           ? 'token-left'
           : hit.type === 'token-right'
             ? 'token-right'
-            : editMode.value === 'line'
+            : timelineStore.editMode === 'line'
               ? 'line-move'
               : 'token-move'
       interaction = {
@@ -227,6 +229,8 @@ function handlePointerDown(event: PointerEvent): void {
         snapshots: timingSnapshots()
       }
     } else {
+      projectStore.clearTokenSelection()
+      timelineStore.selectedTokenId = null
       interaction = { kind: 'seek' }
       seekAt(x)
     }
@@ -257,11 +261,17 @@ function handlePointerUp(event: PointerEvent): void {
   timelineStore.snapGuideTime = null
 }
 
+function clearTokenSelection(): void {
+  projectStore.clearTokenSelection()
+  timelineStore.selectedTokenId = null
+}
+
 function handleWheel(event: WheelEvent): void {
   if (!playerStore.source) return
   if (event.ctrlKey || event.metaKey) {
     timelineStore.zoomAt(pointerX(event), Math.exp(-event.deltaY * 0.002), duration())
   } else {
+    timelineStore.followPlayback = false
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
     timelineStore.panByPixels(-delta, duration())
   }
@@ -270,6 +280,31 @@ function handleWheel(event: WheelEvent): void {
 function zoom(scale: number): void {
   timelineStore.zoomAt(timelineStore.width / 2, scale, duration())
 }
+
+const zoomLevel = computed(() => {
+  const range = Math.log(MAX_PIXELS_PER_SECOND / MIN_PIXELS_PER_SECOND)
+  return (Math.log(timelineStore.pixelsPerSecond / MIN_PIXELS_PER_SECOND) / range) * 100
+})
+
+function setZoomLevel(event: Event): void {
+  const level = Number((event.target as HTMLInputElement).value) / 100
+  const next = MIN_PIXELS_PER_SECOND * (MAX_PIXELS_PER_SECOND / MIN_PIXELS_PER_SECOND) ** level
+  timelineStore.zoomAt(timelineStore.width / 2, next / timelineStore.pixelsPerSecond, duration())
+}
+
+function toggleFollow(): void {
+  timelineStore.followPlayback = !timelineStore.followPlayback
+  if (timelineStore.followPlayback) timelineStore.followTime(playerStore.currentTime, duration())
+}
+
+watch(
+  () => playerStore.currentTime,
+  (time) => {
+    if (playerStore.playing && timelineStore.followPlayback) {
+      timelineStore.followTime(time, duration())
+    }
+  }
+)
 
 watch(
   () => playerStore.source,
@@ -306,19 +341,19 @@ watchEffect(() => {
   const width = timelineStore.width
   if (
     element.width !== Math.round(width * ratio) ||
-    element.height !== Math.round(HEIGHT * ratio)
+    element.height !== Math.round(canvasHeight.value * ratio)
   ) {
     element.width = Math.round(width * ratio)
-    element.height = Math.round(HEIGHT * ratio)
+    element.height = Math.round(canvasHeight.value * ratio)
     element.style.width = `${width}px`
-    element.style.height = `${HEIGHT}px`
+    element.style.height = `${canvasHeight.value}px`
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0)
 
   renderer ??= new TimelineRenderer(context)
   renderer.draw({
     viewport: timelineStore.viewport,
-    height: HEIGHT,
+    height: canvasHeight.value,
     duration: duration(),
     currentTime: playerStore.currentTime,
     waveform: timelineStore.waveform,
@@ -331,7 +366,10 @@ watchEffect(() => {
 onMounted(() => {
   if (!container.value) return
   resizeObserver = new ResizeObserver(([entry]) => {
-    if (entry) timelineStore.setWidth(entry.contentRect.width, duration())
+    if (entry) {
+      timelineStore.setWidth(entry.contentRect.width, duration())
+      canvasHeight.value = Math.max(120, entry.contentRect.height)
+    }
   })
   resizeObserver.observe(container.value)
 })
@@ -344,6 +382,7 @@ onUnmounted(() => {
 
 <template>
   <section class="timeline" aria-label="时间轴">
+    <PlayerBar />
     <header class="timeline-toolbar">
       <div>
         <strong>Timeline</strong>
@@ -354,11 +393,44 @@ onUnmounted(() => {
         <span v-else>{{ Math.round(timelineStore.pixelsPerSecond) }} px/s</span>
       </div>
       <div class="timeline-actions">
-        <button type="button" :class="{ active: editMode === 'token' }" @click="editMode = 'token'">
+        <button
+          type="button"
+          :class="{ active: timelineStore.editMode === 'token' }"
+          @click="timelineStore.editMode = 'token'"
+        >
           Token
         </button>
-        <button type="button" :class="{ active: editMode === 'line' }" @click="editMode = 'line'">
+        <button
+          type="button"
+          :class="{ active: timelineStore.editMode === 'line' }"
+          @click="timelineStore.editMode = 'line'"
+        >
           整句移动
+        </button>
+        <button
+          type="button"
+          :class="{
+            active: timelineStore.adjacentLocked && timelineStore.editMode === 'token'
+          }"
+          :aria-pressed="timelineStore.adjacentLocked"
+          :disabled="timelineStore.editMode === 'line'"
+          :title="
+            timelineStore.adjacentLocked
+              ? '拖动或快捷键微调时联动相邻 Token；拖动时按 Alt 临时解锁'
+              : '拖动和快捷键微调都只调整当前 Token'
+          "
+          @click="timelineStore.adjacentLocked = !timelineStore.adjacentLocked"
+        >
+          {{ timelineStore.adjacentLocked ? '🔒 相邻锁定' : '🔓 独立调整' }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: timelineStore.followPlayback }"
+          :aria-pressed="timelineStore.followPlayback"
+          title="播放游标到达右边界时自动切换到下一段"
+          @click="toggleFollow"
+        >
+          {{ timelineStore.followPlayback ? '◉ 跟随播放' : '○ 跟随关闭' }}
         </button>
         <button type="button" aria-label="缩小时间轴" @click="zoom(0.8)">−</button>
         <button type="button" @click="timelineStore.fit(duration())">适合窗口</button>
@@ -374,10 +446,36 @@ onUnmounted(() => {
         @pointerup="handlePointerUp"
         @pointercancel="handlePointerUp"
         @wheel.prevent="handleWheel"
-        @contextmenu.prevent
+        @contextmenu.prevent="clearTokenSelection"
       />
       <div v-if="!playerStore.source" class="timeline-empty">导入歌曲后显示波形与时间轴</div>
     </div>
-    <p class="timeline-help">拖动 Token 或边缘编辑 · Alt 临时解除相邻联动 · Shift + 拖动平移</p>
+    <footer class="timeline-footer">
+      <p class="timeline-help">
+        {{
+          timelineStore.followPlayback
+            ? '跟随播放已开启 · 到达可视区末端时自动切换下一段'
+            : timelineStore.editMode === 'line'
+              ? '整句移动模式 · Shift + 拖动平移时间轴'
+              : timelineStore.adjacentLocked
+                ? '相邻已锁定：拖动和快捷键会联动前后 Token · Alt 临时解锁拖动'
+                : '独立调整：拖动和快捷键只修改当前 Token · Shift + 拖动平移时间轴'
+        }}
+      </p>
+      <label class="timeline-zoom-control" title="拖动调节时间线缩放尺度">
+        <span aria-hidden="true">−</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="0.5"
+          :value="zoomLevel"
+          aria-label="时间线缩放尺度"
+          @input="setZoomLevel"
+        />
+        <span aria-hidden="true">＋</span>
+        <output>{{ Math.round(timelineStore.pixelsPerSecond) }} px/s</output>
+      </label>
+    </footer>
   </section>
 </template>

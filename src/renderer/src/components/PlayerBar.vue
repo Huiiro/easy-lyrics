@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
@@ -10,12 +10,16 @@ const playerStore = usePlayerStore()
 const projectStore = useProjectStore()
 const player = getAudioPlayer()
 let unsubscribe: (() => void) | null = null
+const seeking = ref(false)
+const seekPosition = ref(0)
 
 const progressMax = computed(() => Math.max(playerStore.duration, 0.001))
+const displayedTime = computed(() => (seeking.value ? seekPosition.value : playerStore.currentTime))
 
 onMounted(() => {
   unsubscribe = player.subscribe((snapshot) => {
     playerStore.currentTime = snapshot.currentTime
+    if (!seeking.value) seekPosition.value = snapshot.currentTime
     playerStore.duration = snapshot.duration
     playerStore.playing = snapshot.playing
     playerStore.volume = snapshot.volume
@@ -61,8 +65,20 @@ async function togglePlayback(): Promise<void> {
   }
 }
 
+function beginSeek(event: Event): void {
+  seeking.value = true
+  seekPosition.value = Number((event.target as HTMLInputElement).value)
+}
+
 function seek(event: Event): void {
-  player.seek(Number((event.target as HTMLInputElement).value))
+  const time = Number((event.target as HTMLInputElement).value)
+  seekPosition.value = time
+  player.seek(time)
+}
+
+function endSeek(event: Event): void {
+  seek(event)
+  seeking.value = false
 }
 
 function changeVolume(event: Event): void {
@@ -75,7 +91,7 @@ function changeRate(event: Event): void {
 </script>
 
 <template>
-  <section class="player-bar" aria-label="音频播放器">
+  <section class="timeline-player" aria-label="音频播放器">
     <button
       class="transport-button"
       type="button"
@@ -90,17 +106,21 @@ function changeRate(event: Event): void {
       <span class="file-hint">{{ playerStore.fileName ? '更换' : 'MP3 / WAV / FLAC' }}</span>
     </button>
 
-    <span class="timecode">{{ formatTime(playerStore.currentTime) }}</span>
+    <span class="timecode">{{ formatTime(displayedTime) }}</span>
     <input
       class="progress"
       type="range"
       min="0"
       :max="progressMax"
       step="0.001"
-      :value="playerStore.currentTime"
+      :value="displayedTime"
       :disabled="!playerStore.source"
       aria-label="播放进度"
+      @pointerdown="beginSeek"
       @input="seek"
+      @change="endSeek"
+      @pointerup="endSeek"
+      @pointercancel="endSeek"
     />
     <span class="timecode duration">{{ formatTime(playerStore.duration) }}</span>
 

@@ -23,5 +23,6 @@
     "src/preload/index.d.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"
-  ]
+  ],
+  "exclude": ["tests/audio-response.test.ts"]
 }
