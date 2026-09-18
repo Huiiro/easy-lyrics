@@ -529,11 +529,16 @@ app.on('open-url', (event, url) => {
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
   electronApp.setAppUserModelId('com.lyric-timeline.app')
+  let protocolRegistered: boolean
   if (is.dev && process.defaultApp && process.argv[1]) {
-    app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL, process.execPath, [process.argv[1]])
+    protocolRegistered = app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL, process.execPath, [
+      resolve(process.argv[1])
+    ])
   } else {
-    app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL)
+    protocolRegistered = app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL)
   }
+  if (!protocolRegistered)
+    console.warn(`Unable to register ${LYRIC_TIMELINE_PROTOCOL}:// URL protocol`)
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
   protocol.handle('lyric-audio', async (request) => {
