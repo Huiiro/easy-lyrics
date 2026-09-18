@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  centerViewportOnTime,
   followViewportToTime,
   panViewportByPixels,
   timeToX,
@@ -41,5 +42,11 @@ describe('timeline viewport transforms', () => {
   it('pages backward and clamps the last playback page', () => {
     expect(followViewportToTime(viewport, 2, 120).startTime).toBe(0)
     expect(followViewportToTime(viewport, 119, 120).startTime).toBe(112)
+  })
+
+  it('centers a selected time and clamps at the audio edges', () => {
+    expect(centerViewportOnTime(viewport, 30, 120).startTime).toBe(26)
+    expect(centerViewportOnTime(viewport, 2, 120).startTime).toBe(0)
+    expect(centerViewportOnTime(viewport, 119, 120).startTime).toBe(112)
   })
 })

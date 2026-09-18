@@ -78,3 +78,16 @@ export function followViewportToTime(
   next.startTime = clampStartTime(next.startTime, next, duration)
   return next
 }
+
+export function centerViewportOnTime(
+  viewport: TimelineViewport,
+  time: number,
+  duration: number
+): TimelineViewport {
+  const next = {
+    ...viewport,
+    startTime: time - viewport.width / viewport.pixelsPerSecond / 2
+  }
+  next.startTime = clampStartTime(next.startTime, next, duration)
+  return next
+}

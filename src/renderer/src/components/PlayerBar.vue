@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watchEffect } from 'vue'
+import { useI18n } from '@renderer/i18n'
 
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
+import { useTimelineStore } from '@renderer/stores/timeline'
 import { getAudioPlayer } from '@renderer/services/audio-player'
 import { formatTime } from '@renderer/utils/time'
 
 const playerStore = usePlayerStore()
+const { t } = useI18n()
 const projectStore = useProjectStore()
+const timelineStore = useTimelineStore()
 const player = getAudioPlayer()
 let unsubscribe: (() => void) | null = null
 const seeking = ref(false)
@@ -16,7 +20,15 @@ const seekPosition = ref(0)
 const progressMax = computed(() => Math.max(playerStore.duration, 0.001))
 const displayedTime = computed(() => (seeking.value ? seekPosition.value : playerStore.currentTime))
 
+watchEffect(() => {
+  player.setLoopRange(
+    timelineStore.loopEnabled ? timelineStore.loopStart : null,
+    timelineStore.loopEnabled ? timelineStore.loopEnd : null
+  )
+})
+
 onMounted(() => {
+  window.addEventListener('audio-select', chooseAudio)
   unsubscribe = player.subscribe((snapshot) => {
     playerStore.currentTime = snapshot.currentTime
     if (!seeking.value) seekPosition.value = snapshot.currentTime
@@ -34,6 +46,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('audio-select', chooseAudio)
   unsubscribe?.()
   player.destroy()
 })
@@ -48,20 +61,7 @@ async function chooseAudio(): Promise<void> {
     playerStore.beginLoad(selection.url, selection.name)
     player.load(selection.url)
   } catch {
-    playerStore.fail('无法打开文件选择器，请重启应用后重试')
-  }
-}
-
-async function togglePlayback(): Promise<void> {
-  if (!playerStore.source) {
-    await chooseAudio()
-    return
-  }
-
-  try {
-    await player.toggle()
-  } catch {
-    playerStore.fail('无法开始播放，请重新选择音频')
+    playerStore.fail(t('无法打开文件选择器，请重启应用后重试'))
   }
 }
 
@@ -81,31 +81,10 @@ function endSeek(event: Event): void {
   seeking.value = false
 }
 
-function changeVolume(event: Event): void {
-  player.setVolume(Number((event.target as HTMLInputElement).value))
-}
-
-function changeRate(event: Event): void {
-  player.setPlaybackRate(Number((event.target as HTMLSelectElement).value))
-}
 </script>
 
 <template>
-  <section class="timeline-player" aria-label="音频播放器">
-    <button
-      class="transport-button"
-      type="button"
-      :aria-label="playerStore.playing ? '暂停' : '播放'"
-      @click="togglePlayback"
-    >
-      {{ playerStore.playing ? 'Ⅱ' : '▶' }}
-    </button>
-
-    <button class="file-button" type="button" @click="chooseAudio">
-      <span class="file-label">{{ playerStore.fileName ?? '选择音频' }}</span>
-      <span class="file-hint">{{ playerStore.fileName ? '更换' : 'MP3 / WAV / FLAC' }}</span>
-    </button>
-
+  <section class="timeline-player timeline-progress-only" :aria-label="t('播放进度')">
     <span class="timecode">{{ formatTime(displayedTime) }}</span>
     <input
       class="progress"
@@ -115,7 +94,7 @@ function changeRate(event: Event): void {
       step="0.001"
       :value="displayedTime"
       :disabled="!playerStore.source"
-      aria-label="播放进度"
+      :aria-label="t('播放进度')"
       @pointerdown="beginSeek"
       @input="seek"
       @change="endSeek"
@@ -123,34 +102,6 @@ function changeRate(event: Event): void {
       @pointercancel="endSeek"
     />
     <span class="timecode duration">{{ formatTime(playerStore.duration) }}</span>
-
-    <label class="volume-control">
-      <span aria-hidden="true">◖</span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        :value="playerStore.volume"
-        aria-label="音量"
-        @input="changeVolume"
-      />
-    </label>
-
-    <select
-      class="rate-select"
-      :value="playerStore.playbackRate"
-      aria-label="播放速度"
-      @change="changeRate"
-    >
-      <option :value="0.5">0.5×</option>
-      <option :value="0.75">0.75×</option>
-      <option :value="1">1×</option>
-      <option :value="1.25">1.25×</option>
-      <option :value="1.5">1.5×</option>
-      <option :value="2">2×</option>
-    </select>
-
     <p v-if="playerStore.error" class="player-error" role="alert">{{ playerStore.error }}</p>
   </section>
 </template>

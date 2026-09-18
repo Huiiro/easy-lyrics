@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { getLineStart, getLineTimingStatus } from '../src/renderer/src/utils/lyrics'
+import {
+  getLineStart,
+  getLineTimingStatus,
+  getPlaybackLineIndex
+} from '../src/renderer/src/utils/lyrics'
 import type { LyricLine } from '../src/shared/models/project'
 
 function lineWithStarts(starts: Array<number | null>): LyricLine {
@@ -21,5 +25,15 @@ describe('getLineTimingStatus', () => {
   it('finds the first available timestamp for line navigation', () => {
     expect(getLineStart(lineWithStarts([null, 2.4, 3]))).toBe(2.4)
     expect(getLineStart(lineWithStarts([null, null]))).toBeNull()
+  })
+})
+
+describe('getPlaybackLineIndex', () => {
+  it('returns the line containing the latest started token', () => {
+    const first = lineWithStarts([1, 2])
+    const second = lineWithStarts([5, 6])
+    expect(getPlaybackLineIndex([first, second], 0.5)).toBe(-1)
+    expect(getPlaybackLineIndex([first, second], 2.5)).toBe(0)
+    expect(getPlaybackLineIndex([first, second], 5.5)).toBe(1)
   })
 })

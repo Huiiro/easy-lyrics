@@ -2,10 +2,14 @@
 import { computed, ref, watch } from 'vue'
 
 import BaseDialog from '@renderer/components/ui/BaseDialog.vue'
+import { useI18n } from '@renderer/i18n'
 import { parseLyricSource, tokenizeLine } from '@renderer/services/tokenizer'
 import type { TokenizerMode } from '@shared/models/project'
 
-const props = defineProps<{ open: boolean }>()
+const props = withDefaults(
+  defineProps<{ open: boolean; initialText?: string; initialMode?: TokenizerMode }>(),
+  { initialText: '', initialMode: 'smart' }
+)
 const emit = defineEmits<{
   close: []
   import: [payload: { text: string; mode: TokenizerMode }]
@@ -14,6 +18,7 @@ const emit = defineEmits<{
 const text = ref('')
 const mode = ref<TokenizerMode>('smart')
 const textarea = ref<HTMLTextAreaElement | null>(null)
+const { t } = useI18n()
 
 const preview = computed(() => {
   const lines = parseLyricSource(text.value).map((line) => line.text)
@@ -26,7 +31,11 @@ const preview = computed(() => {
 watch(
   () => props.open,
   (open) => {
-    if (open) requestAnimationFrame(() => textarea.value?.focus())
+    if (open) {
+      text.value = props.initialText
+      mode.value = props.initialMode
+      requestAnimationFrame(() => textarea.value?.focus())
+    }
   }
 )
 
@@ -43,44 +52,44 @@ function submit(): void {
       <header class="dialog-header">
         <div>
           <p class="eyebrow">Lyrics</p>
-          <h2 id="lyrics-import-title">导入歌词</h2>
+          <h2 id="lyrics-import-title">{{ initialText ? t('编辑歌词') : t('导入歌词') }}</h2>
         </div>
-        <button class="icon-button" type="button" aria-label="关闭" @click="emit('close')">
+        <button class="icon-button" type="button" :aria-label="t('关闭')" @click="emit('close')">
           ×
         </button>
       </header>
 
-      <label class="field-label" for="lyrics-source">每行一句歌词</label>
+      <label class="field-label" for="lyrics-source">{{ t('每行一句歌词') }}</label>
       <textarea
         id="lyrics-source"
         ref="textarea"
         v-model="text"
         rows="12"
-        placeholder="徘徊着的在路上的&#10;你要走吗 via via&#10;易碎的骄傲着"
+        :placeholder="t('歌词输入示例')"
       />
 
       <fieldset class="tokenizer-options">
-        <legend>拆分方式</legend>
-        <label><input v-model="mode" type="radio" value="smart" /> 智能</label>
-        <label><input v-model="mode" type="radio" value="char" /> 逐字</label>
-        <label><input v-model="mode" type="radio" value="word" /> 逐词</label>
+        <legend>{{ t('拆分方式') }}</legend>
+        <label><input v-model="mode" type="radio" value="smart" /> {{ t('智能') }}</label>
+        <label><input v-model="mode" type="radio" value="char" /> {{ t('逐字') }}</label>
+        <label><input v-model="mode" type="radio" value="word" /> {{ t('逐词') }}</label>
       </fieldset>
 
       <p class="tokenizer-hint">
-        支持普通文本和 LRC 时间标签；智能模式按中文字、英文单词和数字拆分。
+        {{ t('支持普通文本和 LRC 时间标签；智能模式按中文字、英文单词和数字拆分。') }}
       </p>
 
       <footer class="dialog-footer">
-        <span>{{ preview.lines }} 行 · {{ preview.tokens }} 个 Token</span>
+        <span>{{ t('{lines} 行 · {tokens} 个 Token', preview) }}</span>
         <div>
-          <button class="secondary-button" type="button" @click="emit('close')">取消</button>
+          <button class="secondary-button" type="button" @click="emit('close')">{{ t('取消') }}</button>
           <button
             class="primary-button"
             type="button"
             :disabled="preview.lines === 0"
             @click="submit"
           >
-            导入
+            {{ initialText ? t('应用修改') : t('导入') }}
           </button>
         </div>
       </footer>

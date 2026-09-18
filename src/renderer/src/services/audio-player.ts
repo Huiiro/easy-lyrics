@@ -14,6 +14,7 @@ export class AudioPlayer {
   private readonly audio: HTMLAudioElement
   private readonly listeners = new Set<AudioPlayerListener>()
   private animationFrame: number | null = null
+  private loopRange: { start: number; end: number } | null = null
 
   constructor(audio = new Audio()) {
     this.audio = audio
@@ -64,6 +65,13 @@ export class AudioPlayer {
     this.emit()
   }
 
+  setLoopRange(start: number | null, end: number | null): void {
+    this.loopRange =
+      start !== null && end !== null && Number.isFinite(start) && end > start
+        ? { start, end }
+        : null
+  }
+
   destroy(): void {
     this.stopFrameLoop()
     this.audio.pause()
@@ -98,6 +106,13 @@ export class AudioPlayer {
   }
 
   private emit(): void {
+    if (
+      this.loopRange &&
+      !this.audio.paused &&
+      this.audio.currentTime >= this.loopRange.end
+    ) {
+      this.audio.currentTime = this.loopRange.start
+    }
     const snapshot = this.snapshot()
     for (const listener of this.listeners) listener(snapshot)
     if (!snapshot.playing) this.stopFrameLoop()

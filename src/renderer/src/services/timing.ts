@@ -10,6 +10,56 @@ export interface TimingResult {
   finished: boolean
 }
 
+export interface AutomaticTimingUpdate {
+  lineIndex: number
+  tokenIndex: number
+  start: number
+  end: number
+}
+
+/** Build a continuous first-pass track while retaining valid imported anchors. */
+export function createAutomaticTiming(
+  lines: LyricLine[],
+  duration: number
+): AutomaticTimingUpdate[] {
+  if (!Number.isFinite(duration) || duration <= 0) return []
+
+  const flat = lines.flatMap((line, lineIndex) =>
+    line.tokens.map((token, tokenIndex) => ({ lineIndex, tokenIndex, token }))
+  )
+  if (flat.length === 0) return []
+
+  const anchors: Array<{ index: number; time: number }> = []
+  let previousTime = -1
+  for (let index = 0; index < flat.length; index += 1) {
+    const start = flat[index]?.token.start
+    if (start === null || start === undefined || start < previousTime || start > duration) continue
+    anchors.push({ index, time: start })
+    previousTime = start
+  }
+
+  if (anchors[0]?.index !== 0) anchors.unshift({ index: 0, time: 0 })
+  anchors.push({ index: flat.length, time: duration })
+
+  const starts = new Array<number>(flat.length)
+  for (let anchorIndex = 0; anchorIndex < anchors.length - 1; anchorIndex += 1) {
+    const from = anchors[anchorIndex]!
+    const to = anchors[anchorIndex + 1]!
+    const count = to.index - from.index
+    if (count <= 0) continue
+    for (let offset = 0; offset < count; offset += 1) {
+      starts[from.index + offset] = from.time + ((to.time - from.time) * offset) / count
+    }
+  }
+
+  return flat.map(({ lineIndex, tokenIndex }, index) => ({
+    lineIndex,
+    tokenIndex,
+    start: starts[index] ?? 0,
+    end: starts[index + 1] ?? duration
+  }))
+}
+
 export function getToken(lines: LyricLine[], cursor: TokenCursor): LyricToken | null {
   return lines[cursor.lineIndex]?.tokens[cursor.tokenIndex] ?? null
 }

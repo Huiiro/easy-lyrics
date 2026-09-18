@@ -12,6 +12,8 @@ export interface TimelineRenderState {
   lines: LyricLine[]
   activeTokenId: string | null
   snapGuideTime: number | null
+  loopStart: number | null
+  loopEnd: number | null
 }
 
 const rulerIntervals = [0.001, 0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300]
@@ -40,10 +42,30 @@ export class TimelineRenderer {
     this.drawBackground(state)
     this.drawRuler(state)
     this.drawWaveform(state)
+    this.drawLoopRange(state)
     this.drawTokens(state)
     this.drawSnapGuide(state)
     this.drawPlayhead(state)
     this.hitTester.setRegions(this.hitRegions)
+  }
+
+  private drawLoopRange(state: TimelineRenderState): void {
+    if (state.loopStart === null || state.loopEnd === null || state.loopEnd <= state.loopStart) return
+    const x1 = timeToX(state.loopStart, state.viewport)
+    const x2 = timeToX(state.loopEnd, state.viewport)
+    if (x2 < 0 || x1 > state.viewport.width) return
+    const { context } = this
+    context.fillStyle = 'rgb(114 228 189 / 10%)'
+    context.fillRect(x1, 27, x2 - x1, state.height - 27)
+    context.strokeStyle = 'rgb(114 228 189 / 65%)'
+    context.setLineDash([3, 3])
+    for (const x of [x1, x2]) {
+      context.beginPath()
+      context.moveTo(x, 27)
+      context.lineTo(x, state.height)
+      context.stroke()
+    }
+    context.setLineDash([])
   }
 
   hitTest(x: number, y: number): TimelineHitRegion | null {

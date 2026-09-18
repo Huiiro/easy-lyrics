@@ -83,4 +83,19 @@ describe('AudioPlayer', () => {
     await player.toggle()
     expect(audio.paused).toBe(true)
   })
+
+  it('loops playback inside the configured token range', async () => {
+    const audio = new FakeAudio()
+    const player = new AudioPlayer(audio as unknown as HTMLAudioElement)
+    player.setLoopRange(2, 3)
+    await player.play()
+    audio.currentTime = 3.01
+    audio.dispatchEvent(new Event('seeked'))
+    expect(audio.currentTime).toBe(2)
+
+    player.setLoopRange(null, null)
+    audio.currentTime = 4
+    audio.dispatchEvent(new Event('seeked'))
+    expect(audio.currentTime).toBe(4)
+  })
 })

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { markTokenAtTime, nextCursor, previousCursor } from '../src/renderer/src/services/timing'
+import {
+  createAutomaticTiming,
+  markTokenAtTime,
+  nextCursor,
+  previousCursor
+} from '../src/renderer/src/services/timing'
 import type { LyricLine } from '../src/shared/models/project'
 
 function createLines(): LyricLine[] {
@@ -69,5 +74,28 @@ describe('markTokenAtTime', () => {
 
     expect(lines[0]?.tokens[0]).toMatchObject({ start: 0, end: 0 })
     expect(lines[0]?.tokens[1]?.start).toBe(0)
+  })
+})
+
+describe('createAutomaticTiming', () => {
+  it('fills the audio duration with continuous token boundaries', () => {
+    const updates = createAutomaticTiming(createLines(), 6)
+    expect(updates).toMatchObject([
+      { start: 0, end: 2 },
+      { start: 2, end: 4 },
+      { start: 4, end: 6 }
+    ])
+  })
+
+  it('preserves imported timing anchors while filling gaps', () => {
+    const lines = createLines()
+    lines[0]!.tokens[0]!.start = 1
+    lines[1]!.tokens[0]!.start = 5
+    const updates = createAutomaticTiming(lines, 8)
+    expect(updates).toMatchObject([
+      { start: 1, end: 3 },
+      { start: 3, end: 5 },
+      { start: 5, end: 8 }
+    ])
   })
 })

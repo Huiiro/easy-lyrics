@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 
 import PlayerBar from '@renderer/components/PlayerBar.vue'
+import { useI18n } from '@renderer/i18n'
 import { getAudioPlayer } from '@renderer/services/audio-player'
 import { decodeWaveform } from '@renderer/services/waveform'
 import { usePlayerStore } from '@renderer/stores/player'
@@ -20,6 +21,7 @@ import {
 import { TimelineRenderer } from '@renderer/timeline/TimelineRenderer'
 import { xToTime } from '@renderer/timeline/viewport'
 import { MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from '@renderer/timeline/viewport'
+import type { LyricProject } from '@shared/models/project'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const container = ref<HTMLElement | null>(null)
@@ -34,6 +36,7 @@ type Interaction =
       tokenIndex: number
       originTime: number
       snapshots: TokenTimingSnapshot[]
+      projectBefore: LyricProject
     }
 
 let interaction: Interaction | null = null
@@ -42,6 +45,15 @@ const player = getAudioPlayer()
 const playerStore = usePlayerStore()
 const projectStore = useProjectStore()
 const timelineStore = useTimelineStore()
+const { t } = useI18n()
+
+const loopRange = computed(() => {
+  const token = projectStore.activeToken
+  if (token?.start === null || token?.start === undefined || token.end === null || token.end <= token.start) {
+    return null
+  }
+  return { start: token.start, end: token.end }
+})
 
 let resizeObserver: ResizeObserver | null = null
 let waveformAbort: AbortController | null = null
@@ -199,7 +211,7 @@ function previewEdit(
     }
   }
 
-  projectStore.applyTokenTimingUpdates(updates)
+  projectStore.applyTokenTimingUpdates(updates, false)
 }
 
 function handlePointerDown(event: PointerEvent): void {
@@ -212,6 +224,7 @@ function handlePointerDown(event: PointerEvent): void {
     const hit = renderer?.hitTest(x, event.clientY - canvas.value.getBoundingClientRect().top)
     if (hit?.lineIndex !== undefined && hit.tokenIndex !== undefined) {
       projectStore.selectToken(hit.lineIndex, hit.tokenIndex)
+      timelineStore.requestLyricsFocus(hit.lineIndex)
       timelineStore.selectedTokenId = hit.id
       const kind =
         hit.type === 'token-left'
@@ -226,7 +239,8 @@ function handlePointerDown(event: PointerEvent): void {
         lineIndex: hit.lineIndex,
         tokenIndex: hit.tokenIndex,
         originTime: xToTime(x, timelineStore.viewport),
-        snapshots: timingSnapshots()
+        snapshots: timingSnapshots(),
+        projectBefore: projectStore.snapshot()
       }
     } else {
       projectStore.clearTokenSelection()
@@ -257,6 +271,9 @@ function handlePointerMove(event: PointerEvent): void {
 function handlePointerUp(event: PointerEvent): void {
   if (canvas.value?.hasPointerCapture(event.pointerId))
     canvas.value.releasePointerCapture(event.pointerId)
+  if (interaction && 'projectBefore' in interaction) {
+    projectStore.recordChange('拖动时间轴', interaction.projectBefore)
+  }
   interaction = null
   timelineStore.snapGuideTime = null
 }
@@ -296,6 +313,28 @@ function toggleFollow(): void {
   timelineStore.followPlayback = !timelineStore.followPlayback
   if (timelineStore.followPlayback) timelineStore.followTime(playerStore.currentTime, duration())
 }
+
+function locateSelectedToken(): void {
+  const start = projectStore.activeToken?.start
+  if (start === null || start === undefined) return
+  timelineStore.locateTime(start, duration())
+  player.seek(start)
+}
+
+function toggleLoop(): void {
+  if (timelineStore.loopEnabled) {
+    timelineStore.disableLoop()
+    return
+  }
+  if (!loopRange.value) return
+  timelineStore.enableLoop(loopRange.value.start, loopRange.value.end)
+  timelineStore.locateTime(loopRange.value.start, duration())
+  player.seek(loopRange.value.start)
+}
+
+watch(loopRange, (range) => {
+  if (range && timelineStore.loopEnabled) timelineStore.enableLoop(range.start, range.end)
+})
 
 watch(
   () => playerStore.currentTime,
@@ -359,7 +398,9 @@ watchEffect(() => {
     waveform: timelineStore.waveform,
     lines: projectStore.project.lines,
     activeTokenId: projectStore.activeToken?.id ?? null,
-    snapGuideTime: timelineStore.snapGuideTime
+    snapGuideTime: timelineStore.snapGuideTime,
+    loopStart: timelineStore.loopEnabled ? timelineStore.loopStart : null,
+    loopEnd: timelineStore.loopEnabled ? timelineStore.loopEnd : null
   })
 })
 
@@ -381,12 +422,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="timeline" aria-label="时间轴">
+  <section class="timeline" :aria-label="t('时间轴')">
     <PlayerBar />
     <header class="timeline-toolbar">
       <div>
         <strong>Timeline</strong>
-        <span v-if="timelineStore.waveformLoading">正在生成波形…</span>
+        <span v-if="timelineStore.waveformLoading">{{ t('正在生成波形…') }}</span>
         <span v-else-if="timelineStore.waveformError" class="timeline-error">
           {{ timelineStore.waveformError }}
         </span>
@@ -405,7 +446,7 @@ onUnmounted(() => {
           :class="{ active: timelineStore.editMode === 'line' }"
           @click="timelineStore.editMode = 'line'"
         >
-          整句移动
+          {{ t('整句移动') }}
         </button>
         <button
           type="button"
@@ -416,25 +457,49 @@ onUnmounted(() => {
           :disabled="timelineStore.editMode === 'line'"
           :title="
             timelineStore.adjacentLocked
-              ? '拖动或快捷键微调时联动相邻 Token；拖动时按 Alt 临时解锁'
-              : '拖动和快捷键微调都只调整当前 Token'
+              ? t('拖动或快捷键微调时联动相邻 Token；拖动时按 Alt 临时解锁')
+              : t('拖动和快捷键微调都只调整当前 Token')
           "
           @click="timelineStore.adjacentLocked = !timelineStore.adjacentLocked"
         >
-          {{ timelineStore.adjacentLocked ? '🔒 相邻锁定' : '🔓 独立调整' }}
+          {{ timelineStore.adjacentLocked ? `🔒 ${t('相邻锁定')}` : `🔓 ${t('独立调整')}` }}
         </button>
         <button
           type="button"
           :class="{ active: timelineStore.followPlayback }"
           :aria-pressed="timelineStore.followPlayback"
-          title="播放游标到达右边界时自动切换到下一段"
+          :title="t('播放游标到达右边界时自动切换到下一段')"
           @click="toggleFollow"
         >
-          {{ timelineStore.followPlayback ? '◉ 跟随播放' : '○ 跟随关闭' }}
+          {{ timelineStore.followPlayback ? `◉ ${t('跟随播放')}` : `○ ${t('跟随关闭')}` }}
         </button>
-        <button type="button" aria-label="缩小时间轴" @click="zoom(0.8)">−</button>
-        <button type="button" @click="timelineStore.fit(duration())">适合窗口</button>
-        <button type="button" aria-label="放大时间轴" @click="zoom(1.25)">＋</button>
+        <button
+          type="button"
+          :disabled="projectStore.activeToken?.start === null || !projectStore.activeToken"
+          :title="t('将选中的 Token 居中并移动播放头')"
+          @click="locateSelectedToken"
+        >
+          ◎ {{ t('定位') }}
+        </button>
+        <button
+          type="button"
+          :disabled="!timelineStore.loopEnabled && !loopRange"
+          :class="{ active: timelineStore.loopEnabled }"
+          :aria-pressed="timelineStore.loopEnabled"
+          :title="
+            timelineStore.loopEnabled
+              ? t('点击退出 Loop；取消选择不会停止循环')
+              : loopRange
+                ? t('循环播放当前 Token')
+                : t('当前 Token 需要有效的起止时间')
+          "
+          @click="toggleLoop"
+        >
+          {{ timelineStore.loopEnabled ? `↻ ${t('Loop 开')}` : '↻ Loop' }}
+        </button>
+        <button type="button" :aria-label="t('缩小时间轴')" @click="zoom(0.8)">−</button>
+        <button type="button" @click="timelineStore.fit(duration())">{{ t('适合窗口') }}</button>
+        <button type="button" :aria-label="t('放大时间轴')" @click="zoom(1.25)">＋</button>
       </div>
     </header>
 
@@ -448,21 +513,21 @@ onUnmounted(() => {
         @wheel.prevent="handleWheel"
         @contextmenu.prevent="clearTokenSelection"
       />
-      <div v-if="!playerStore.source" class="timeline-empty">导入歌曲后显示波形与时间轴</div>
+      <div v-if="!playerStore.source" class="timeline-empty">{{ t('导入歌曲后显示波形与时间轴') }}</div>
     </div>
     <footer class="timeline-footer">
       <p class="timeline-help">
         {{
           timelineStore.followPlayback
-            ? '跟随播放已开启 · 到达可视区末端时自动切换下一段'
+            ? t('跟随播放已开启 · 到达可视区末端时自动切换下一段')
             : timelineStore.editMode === 'line'
-              ? '整句移动模式 · Shift + 拖动平移时间轴'
+              ? t('整句移动模式 · Shift + 拖动平移时间轴')
               : timelineStore.adjacentLocked
-                ? '相邻已锁定：拖动和快捷键会联动前后 Token · Alt 临时解锁拖动'
-                : '独立调整：拖动和快捷键只修改当前 Token · Shift + 拖动平移时间轴'
+                ? t('相邻已锁定：拖动和快捷键会联动前后 Token · Alt 临时解锁拖动')
+                : t('独立调整：拖动和快捷键只修改当前 Token · Shift + 拖动平移时间轴')
         }}
       </p>
-      <label class="timeline-zoom-control" title="拖动调节时间线缩放尺度">
+      <label class="timeline-zoom-control" :title="t('拖动调节时间线缩放尺度')">
         <span aria-hidden="true">−</span>
         <input
           type="range"
@@ -470,7 +535,7 @@ onUnmounted(() => {
           max="100"
           step="0.5"
           :value="zoomLevel"
-          aria-label="时间线缩放尺度"
+          :aria-label="t('时间线缩放尺度')"
           @input="setZoomLevel"
         />
         <span aria-hidden="true">＋</span>

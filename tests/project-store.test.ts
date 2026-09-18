@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useProjectStore } from '../src/renderer/src/stores/project'
+import { useHistoryStore } from '../src/renderer/src/stores/history'
 import type { LyricLine } from '../src/shared/models/project'
 
 const lines: LyricLine[] = [
@@ -134,5 +135,94 @@ describe('project store lyric selection', () => {
     expect(store.project.lines[0]?.tokens[0]?.end).toBeCloseTo(2.4)
     expect(store.project.lines[0]?.tokens[1]?.start).toBeCloseTo(2.4)
     expect(store.project.lines[0]?.tokens[1]?.end).toBeCloseTo(3.4)
+  })
+
+  it('undoes and redoes an edit as one command', () => {
+    const store = useProjectStore()
+    const history = useHistoryStore()
+    const untimedLines = structuredClone(lines)
+    for (const line of untimedLines) {
+      for (const token of line.tokens) {
+        token.start = null
+        token.end = null
+      }
+    }
+    store.importLyrics(untimedLines, 'smart')
+    history.clear()
+
+    store.setTokenBoundary('start', 1.5)
+    expect(store.activeToken?.start).toBe(1.5)
+    expect(history.undoDepth).toBe(1)
+
+    history.undo()
+    expect(store.activeToken?.start).toBeNull()
+    history.redo()
+    expect(store.activeToken?.start).toBe(1.5)
+  })
+
+  it('copies a line timing pattern and pastes it at the playhead', () => {
+    const store = useProjectStore()
+    const repeatedLines = [structuredClone(lines[0]!), structuredClone(lines[0]!)]
+    repeatedLines[0]!.tokens[0]!.start = 1
+    repeatedLines[0]!.tokens[0]!.end = 1.5
+    repeatedLines[0]!.tokens[1]!.start = 1.5
+    repeatedLines[0]!.tokens[1]!.end = 2
+    for (const token of repeatedLines[1]!.tokens) {
+      token.start = null
+      token.end = null
+    }
+    store.importLyrics(repeatedLines, 'smart')
+
+    expect(store.copyActiveLineTiming()).toBe(true)
+    store.selectToken(1, 0)
+    expect(store.canPasteLineTiming).toBe(true)
+    expect(store.pasteLineTimingAt(10)).toBe(true)
+    expect(store.project.lines[1]?.tokens).toMatchObject([
+      { start: 10, end: 10.5 },
+      { start: 10.5, end: 11 }
+    ])
+  })
+
+  it('only pastes timing onto a line with the same token structure', () => {
+    const store = useProjectStore()
+    const timedLines = structuredClone(lines)
+    timedLines[0]!.tokens[0]!.start = 1
+    timedLines[0]!.tokens[1]!.start = 2
+    store.importLyrics(timedLines, 'smart')
+    store.copyActiveLineTiming()
+    store.selectToken(1, 0)
+
+    expect(store.canPasteLineTiming).toBe(false)
+    expect(store.pasteLineTimingAt(10)).toBe(false)
+  })
+
+  it('splits a token and distributes its complete timing interval', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+    store.selectToken(1, 0)
+    store.setTokenBoundary('start', 4)
+    store.setTokenBoundary('end', 6)
+
+    expect(store.splitActiveToken(['he', 'llo'])).toBe(true)
+    expect(store.project.lines[1]?.tokens).toMatchObject([
+      { text: 'he', start: 4, end: 5 },
+      { text: 'llo', start: 5, end: 6 }
+    ])
+  })
+
+  it('merges adjacent tokens and keeps their outer timing bounds', () => {
+    const store = useProjectStore()
+    const timedLines = structuredClone(lines)
+    timedLines[0]!.tokens[0]!.start = 1
+    timedLines[0]!.tokens[0]!.end = 2
+    timedLines[0]!.tokens[1]!.start = 2
+    timedLines[0]!.tokens[1]!.end = 3
+    store.importLyrics(timedLines, 'smart')
+
+    expect(store.mergeActiveToken(1)).toBe(true)
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { text: '你好', start: 1, end: 3 }
+    ])
+    expect(store.currentTokenIndex).toBe(0)
   })
 })

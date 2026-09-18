@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   charTokenizer,
   createLyricLines,
+  lyricLinesToSource,
   parseLyricSource,
   smartTokenizer,
   wordTokenizer
@@ -92,5 +93,10 @@ describe('createLyricLines', () => {
       { text: 'Chorus', start: 4.05 },
       { text: 'Plain line', start: null }
     ])
+  })
+
+  it('serializes imported lines for editing without losing line anchors', () => {
+    const lines = createLyricLines('[00:03.200]Hello world\nPlain line', 'smart', () => 'id')
+    expect(lyricLinesToSource(lines)).toBe('[00:03.200]Hello world\nPlain line')
   })
 })

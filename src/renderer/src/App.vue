@@ -1,35 +1,44 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import LyricsImportDialog from '@renderer/components/LyricsImportDialog.vue'
+import AppHeader from '@renderer/components/AppHeader.vue'
 import LyricsPanel from '@renderer/components/LyricsPanel.vue'
+import LyricsPreview from '@renderer/components/LyricsPreview.vue'
+import ExportDialog from '@renderer/components/ExportDialog.vue'
 import SettingsDialog from '@renderer/components/SettingsDialog.vue'
 import TokenInspector from '@renderer/components/TokenInspector.vue'
 import Timeline from '@renderer/components/timeline/Timeline.vue'
+import { useI18n } from '@renderer/i18n'
 import { useGlobalShortcuts } from '@renderer/composables/use-global-shortcuts'
 import { getAudioPlayer } from '@renderer/services/audio-player'
-import { createLyricLines } from '@renderer/services/tokenizer'
+import { createLyricLines, lyricLinesToSource } from '@renderer/services/tokenizer'
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
-import { useTimelineStore } from '@renderer/stores/timeline'
-import type { TokenizerMode } from '@shared/models/project'
+import type { ProjectFileResult, RecentProject } from '@shared/ipc'
+import { createEmptyProject, type TokenizerMode } from '@shared/models/project'
 
-const ipcStatus = ref('正在检查…')
+const { locale, setLocale, t } = useI18n()
+setLocale(locale.value)
+const ipcStatus = ref(t('正在检查…'))
 const importOpen = ref(false)
 const settingsOpen = ref(false)
+const exportOpen = ref(false)
+const recentProjects = ref<RecentProject[]>([])
 const workspace = ref<HTMLElement | null>(null)
 const leftWidth = ref(28)
 const leftTopHeight = ref(62)
 const rightTopHeight = ref(58)
 const projectStore = useProjectStore()
 const playerStore = usePlayerStore()
-const timelineStore = useTimelineStore()
 const player = getAudioPlayer()
-const previousLine = computed(
-  () => projectStore.project.lines[projectStore.currentLineIndex - 1] ?? null
-)
-const nextLine = computed(
-  () => projectStore.project.lines[projectStore.currentLineIndex + 1] ?? null
+const projectPath = ref<string | null>(null)
+const fileStatus = ref('')
+let autosaveTimer: ReturnType<typeof setInterval> | null = null
+watch(
+  () => projectStore.dirty,
+  (dirty) => window.desktopApi?.setProjectDirty(dirty),
+  { immediate: true }
 )
 
 useGlobalShortcuts()
@@ -42,6 +51,7 @@ const workspaceStyle = computed(() => ({
   '--left-top-height': `${leftTopHeight.value}%`,
   '--right-top-height': `${rightTopHeight.value}%`
 }))
+const editableLyrics = computed(() => lyricLinesToSource(projectStore.project.lines))
 
 function beginResize(target: ResizeTarget, event: PointerEvent): void {
   resizing = target
@@ -79,68 +89,212 @@ function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
   projectStore.importLyrics(createLyricLines(payload.text, payload.mode), payload.mode)
 }
 
-async function togglePlayback(): Promise<void> {
-  if (!playerStore.source) return
-  await player.toggle()
+function resetProject(): void {
+  player.pause()
+  playerStore.source = null
+  playerStore.fileName = null
+  playerStore.currentTime = 0
+  playerStore.duration = 0
+  projectStore.loadProject(createEmptyProject())
+  projectPath.value = null
+  fileStatus.value = t('新工程')
 }
 
-function fitTimeline(): void {
-  timelineStore.fit(playerStore.duration || timelineStore.waveform?.duration || 0)
+function newProject(): void {
+  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要新建工程吗？'))) return
+  resetProject()
 }
 
-onUnmounted(() => document.body.classList.remove('is-resizing'))
+function closeProject(): void {
+  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要关闭工程吗？'))) return
+  resetProject()
+  fileStatus.value = t('工程已关闭')
+}
+
+function renameProject(): void {
+  const name = window.prompt(t('工程名称'), projectStore.project.name)
+  if (name) projectStore.setProjectName(name)
+}
+
+function showSaveHistory(): void {
+  const records = recentProjects.value
+    .map((item) => `${new Date(item.lastOpenedAt).toLocaleString()}  ${item.name}`)
+    .join('\n')
+  window.alert(records || t('暂无保存记录'))
+}
+
+function handleCommand(action: string): void {
+  const handlers: Record<string, () => void> = {
+    newProject,
+    openProject: () => void openProject(),
+    saveProject: () => void saveProject(),
+    renameProject,
+    closeProject,
+    saveHistory: showSaveHistory,
+    importLyrics: openLyricsImport,
+    exportLyrics: openLyricsExport,
+    selectAudio: () => window.dispatchEvent(new CustomEvent('audio-select')),
+    settings: () => (settingsOpen.value = true)
+  }
+  const handler = handlers[action]
+  if (handler) handler()
+  else window.dispatchEvent(new CustomEvent('app-shortcut', { detail: action }))
+}
+
+function handleNativeCommand(event: Event): void {
+  const action = (event as CustomEvent<string>).detail
+  if (action.startsWith('openRecent:')) {
+    void openRecentProject(action.slice('openRecent:'.length))
+  } else {
+    handleCommand(action)
+  }
+}
+
+function openLyricsImport(): void {
+  importOpen.value = true
+}
+
+function openLyricsExport(): void {
+  if (projectStore.project.lines.length) exportOpen.value = true
+}
+
+function loadAudio(selection: ProjectFileResult['audio']): void {
+  if (!selection) {
+    playerStore.source = null
+    playerStore.fileName = null
+    return
+  }
+  playerStore.beginLoad(selection.url, selection.name)
+  player.load(selection.url)
+}
+
+async function applyLoadedProject(result: ProjectFileResult): Promise<void> {
+  projectStore.loadProject(result.project)
+  if (!result.path) projectStore.dirty = true
+  projectPath.value = result.path
+  loadAudio(result.audio)
+  fileStatus.value = result.path ? t('工程已打开') : t('已恢复自动保存')
+  if (result.audioMissing && window.confirm(t('工程引用的音频不存在。是否现在重新定位音频？'))) {
+    const selection = await window.desktopApi.selectAudio()
+    if (selection) {
+      projectStore.setAudio({
+        path: selection.path,
+        name: selection.name,
+        duration: result.project.audio?.duration ?? null
+      })
+      loadAudio(selection)
+      fileStatus.value = t('已重新定位音频，请保存工程')
+    }
+  }
+}
+
+async function refreshRecentProjects(): Promise<void> {
+  recentProjects.value = await window.desktopApi.listRecentProjects()
+}
+
+async function saveProject(): Promise<void> {
+  try {
+    const result = await window.desktopApi.saveProject(
+      projectStore.snapshot(),
+      projectPath.value ?? undefined
+    )
+    if (!result) return
+    projectPath.value = result.path
+    projectStore.markSaved()
+    fileStatus.value = t('已保存')
+    await refreshRecentProjects()
+  } catch (error) {
+    fileStatus.value = error instanceof Error ? error.message : t('保存失败')
+  }
+}
+
+async function openProject(): Promise<void> {
+  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要打开其他工程吗？'))) return
+  try {
+    const result = await window.desktopApi.openProject()
+    if (result) {
+      await applyLoadedProject(result)
+      await refreshRecentProjects()
+    }
+  } catch (error) {
+    fileStatus.value = error instanceof Error ? error.message : t('打开失败')
+  }
+}
+
+async function openRecentProject(path: string): Promise<void> {
+  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要打开其他工程吗？'))) return
+  try {
+    const result = await window.desktopApi.openRecentProject(path)
+    if (!result) {
+      fileStatus.value = t('工程文件不存在或无法读取')
+      await refreshRecentProjects()
+      return
+    }
+    await applyLoadedProject(result)
+    await refreshRecentProjects()
+  } catch (error) {
+    fileStatus.value = error instanceof Error ? error.message : t('打开最近工程失败')
+  }
+}
+
+onUnmounted(() => {
+  document.body.classList.remove('is-resizing')
+  window.removeEventListener('project-save', saveProject)
+  window.removeEventListener('project-open', openProject)
+  window.removeEventListener('lyrics-import', openLyricsImport)
+  window.removeEventListener('lyrics-export', openLyricsExport)
+  window.removeEventListener('app-command', handleNativeCommand)
+  if (autosaveTimer) clearInterval(autosaveTimer)
+})
 
 onMounted(async () => {
+  window.addEventListener('project-save', saveProject)
+  window.addEventListener('project-open', openProject)
+  window.addEventListener('lyrics-import', openLyricsImport)
+  window.addEventListener('lyrics-export', openLyricsExport)
+  window.addEventListener('app-command', handleNativeCommand)
+  autosaveTimer = setInterval(async () => {
+    if (!projectStore.dirty) return
+    try {
+      await window.desktopApi.autosaveProject(projectStore.snapshot())
+      fileStatus.value = t('已自动保存')
+    } catch {
+      fileStatus.value = t('自动保存失败')
+    }
+  }, 30_000)
   try {
     const bridgeReady = (await window.desktopApi.ping()) === 'pong'
-    ipcStatus.value = bridgeReady ? 'Main / Preload / Renderer 正常' : '响应异常'
+    ipcStatus.value = bridgeReady ? 'Main / Preload / Renderer OK' : t('响应异常')
     if (bridgeReady && import.meta.env.DEV) console.info('[Lyric Timeline] IPC bridge ready')
+    await refreshRecentProjects()
+    const autosave = bridgeReady ? await window.desktopApi.loadAutosave() : null
+    const restoreAutosave = Boolean(
+      autosave && window.confirm(t('发现上次自动保存的工程，是否恢复？'))
+    )
+    if (autosave && restoreAutosave) {
+      await applyLoadedProject(autosave)
+    } else if (bridgeReady) {
+      const latest = await window.desktopApi.loadLastProject()
+      if (latest) {
+        await applyLoadedProject(latest)
+        fileStatus.value = t('已自动打开上次工程')
+        await refreshRecentProjects()
+      }
+    }
   } catch {
-    ipcStatus.value = 'IPC 不可用'
+    ipcStatus.value = t('IPC 不可用')
   }
 })
 </script>
 
 <template>
   <main class="shell">
-    <header class="titlebar">
-      <span class="brand-mark" aria-hidden="true" />
-      <strong>Lyric Timeline</strong>
-      <span class="phase">Timeline Workspace</span>
-      <button class="header-settings" type="button" title="设置" @click="settingsOpen = true">
-        <span aria-hidden="true">⚙</span><span>设置</span>
-      </button>
-    </header>
-
-    <nav class="app-toolbar" aria-label="主要操作">
-      <div class="toolbar-group">
-        <button type="button" @click="importOpen = true">＋ 导入歌词</button>
-        <button type="button" :disabled="!playerStore.source" @click="togglePlayback">
-          {{ playerStore.playing ? 'Ⅱ 暂停' : '▶ 播放' }}
-        </button>
-      </div>
-      <div class="toolbar-group">
-        <button
-          type="button"
-          :disabled="!projectStore.activeToken"
-          @click="projectStore.navigateToken(-1)"
-        >
-          ← 上一词
-        </button>
-        <button
-          type="button"
-          :disabled="!projectStore.activeToken"
-          @click="projectStore.navigateToken(1)"
-        >
-          下一词 →
-        </button>
-        <button type="button" :disabled="!playerStore.duration" @click="fitTimeline">
-          适合时间轴
-        </button>
-      </div>
-      <span class="toolbar-spacer" />
-      <span class="toolbar-project">{{ projectStore.project.name }}</span>
-    </nav>
+    <AppHeader
+      :recent-projects="recentProjects"
+      :project-path="projectPath"
+      @command="handleCommand"
+      @open-recent="openRecentProject"
+    />
 
     <section class="workspace">
       <div
@@ -154,7 +308,7 @@ onMounted(async () => {
           <div
             class="splitter splitter-horizontal"
             role="separator"
-            aria-label="调整歌词与属性面板高度"
+            :aria-label="t('调整歌词与属性面板高度')"
             @pointerdown="beginResize('left-rows', $event)"
             @pointerup="endResize"
             @pointercancel="endResize"
@@ -165,57 +319,18 @@ onMounted(async () => {
         <div
           class="splitter splitter-vertical"
           role="separator"
-          aria-label="调整工具区宽度"
+          :aria-label="t('调整工具区宽度')"
           @pointerdown="beginResize('columns', $event)"
           @pointerup="endResize"
           @pointercancel="endResize"
         />
 
         <section class="workspace-column edit-workspace">
-          <section class="stage preview-stage">
-            <header class="pane-title"><strong>节目监视器</strong><span>歌词效果预览</span></header>
-            <div class="lyric-focus">
-              <template v-if="projectStore.activeLine">
-                <p class="context-line previous">{{ previousLine?.text ?? ' ' }}</p>
-                <p class="eyebrow">当前句 · {{ projectStore.currentLineIndex + 1 }}</p>
-                <h1 class="active-line">{{ projectStore.activeLine.text }}</h1>
-                <div class="active-tokens">
-                  <button
-                    v-for="(token, tokenIndex) in projectStore.activeLine.tokens"
-                    :key="token.id"
-                    type="button"
-                    :class="{
-                      active:
-                        projectStore.activeToken !== null &&
-                        tokenIndex === projectStore.currentTokenIndex,
-                      timed: token.start !== null
-                    }"
-                    @click="projectStore.selectToken(projectStore.currentLineIndex, tokenIndex)"
-                  >
-                    {{ token.text }}
-                  </button>
-                </div>
-                <p class="timing-prompt" :class="{ complete: projectStore.timingFinished }">
-                  {{
-                    projectStore.timingFinished
-                      ? '打轴完成 · 最后一个 Token 已闭合'
-                      : '按 F 记录当前 Token'
-                  }}
-                </p>
-                <p class="context-line next">{{ nextLine?.text ?? '已经是最后一句' }}</p>
-              </template>
-
-              <template v-else>
-                <p class="eyebrow">逐字歌词打轴工具</p>
-                <h1>现在，写下歌词。</h1>
-                <p class="lede">从左侧导入歌词，中文逐字、英文逐词，准备进入连续打轴。</p>
-              </template>
-            </div>
-          </section>
+          <LyricsPreview />
           <div
             class="splitter splitter-horizontal"
             role="separator"
-            aria-label="调整预览与时间轴高度"
+            :aria-label="t('调整预览与时间轴高度')"
             @pointerdown="beginResize('right-rows', $event)"
             @pointerup="endResize"
             @pointercancel="endResize"
@@ -228,9 +343,17 @@ onMounted(async () => {
     <footer class="statusbar">
       <span class="status-dot" />
       {{ ipcStatus }}
+      <span v-if="fileStatus"> · {{ fileStatus }}</span>
     </footer>
 
-    <LyricsImportDialog :open="importOpen" @close="importOpen = false" @import="importLyrics" />
+    <LyricsImportDialog
+      :open="importOpen"
+      :initial-text="editableLyrics"
+      :initial-mode="projectStore.project.settings.tokenizer"
+      @close="importOpen = false"
+      @import="importLyrics"
+    />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
+    <ExportDialog :open="exportOpen" @close="exportOpen = false" />
   </main>
 </template>

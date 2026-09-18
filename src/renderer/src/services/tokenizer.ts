@@ -91,3 +91,17 @@ export function createLyricLines(
     })
     .filter((line): line is LyricLine => line !== null)
 }
+
+export function lyricLinesToSource(lines: LyricLine[]): string {
+  return lines
+    .map((line) => {
+      const start = line.tokens.find((token) => token.start !== null)?.start ?? null
+      if (start === null) return line.text
+      const milliseconds = Math.round(start * 1000)
+      const minutes = Math.floor(milliseconds / 60_000)
+      const seconds = Math.floor((milliseconds % 60_000) / 1000)
+      const fraction = milliseconds % 1000
+      return `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(fraction).padStart(3, '0')}]${line.text}`
+    })
+    .join('\n')
+}

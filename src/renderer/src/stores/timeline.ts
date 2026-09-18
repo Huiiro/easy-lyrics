@@ -3,6 +3,7 @@ import { computed, ref, shallowRef } from 'vue'
 
 import type { WaveformData } from '@renderer/services/waveform'
 import {
+  centerViewportOnTime,
   clampStartTime,
   followViewportToTime,
   panViewportByPixels,
@@ -14,6 +15,12 @@ export const useTimelineStore = defineStore('timeline', () => {
   const editMode = ref<'token' | 'line'>('token')
   const adjacentLocked = ref(true)
   const followPlayback = ref(true)
+  const followLyrics = ref(true)
+  const loopEnabled = ref(false)
+  const loopStart = ref<number | null>(null)
+  const loopEnd = ref<number | null>(null)
+  const lyricsFocusLineIndex = ref<number | null>(null)
+  const lyricsFocusNonce = ref(0)
   const startTime = ref(0)
   const pixelsPerSecond = ref(100)
   const width = ref(1)
@@ -51,6 +58,29 @@ export const useTimelineStore = defineStore('timeline', () => {
     applyViewport(followViewportToTime(viewport.value, time, duration))
   }
 
+  function locateTime(time: number, duration: number): void {
+    applyViewport(centerViewportOnTime(viewport.value, time, duration))
+  }
+
+  function enableLoop(start: number, end: number): void {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return
+    loopStart.value = start
+    loopEnd.value = end
+    loopEnabled.value = true
+  }
+
+  function disableLoop(): void {
+    loopEnabled.value = false
+    loopStart.value = null
+    loopEnd.value = null
+  }
+
+  function requestLyricsFocus(lineIndex: number): void {
+    if (!Number.isInteger(lineIndex) || lineIndex < 0) return
+    lyricsFocusLineIndex.value = lineIndex
+    lyricsFocusNonce.value += 1
+  }
+
   function fit(duration: number): void {
     if (duration <= 0) return
     startTime.value = 0
@@ -86,6 +116,12 @@ export const useTimelineStore = defineStore('timeline', () => {
     editMode,
     adjacentLocked,
     followPlayback,
+    followLyrics,
+    loopEnabled,
+    loopStart,
+    loopEnd,
+    lyricsFocusLineIndex,
+    lyricsFocusNonce,
     startTime,
     pixelsPerSecond,
     width,
@@ -99,6 +135,10 @@ export const useTimelineStore = defineStore('timeline', () => {
     zoomAt,
     panByPixels,
     followTime,
+    locateTime,
+    enableLoop,
+    disableLoop,
+    requestLyricsFocus,
     fit,
     beginWaveformLoad,
     setWaveform,

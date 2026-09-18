@@ -1,13 +1,15 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, toRaw } from 'vue'
 
 import {
+  createAutomaticTiming,
   markTokenAtTime,
   nextCursor,
   previousCursor,
   type TokenCursor
 } from '@renderer/services/timing'
 import { MIN_TOKEN_DURATION } from '@renderer/timeline/editing'
+import { useHistoryStore } from '@renderer/stores/history'
 import {
   createEmptyProject,
   type AudioSource,
@@ -24,6 +26,11 @@ export interface TokenTimingUpdate {
   end: LyricToken['end']
 }
 
+interface LineTimingClipboard {
+  tokenTexts: string[]
+  timings: Array<{ startOffset: number; endOffset: number | null }>
+}
+
 export const useProjectStore = defineStore('project', () => {
   const project = ref<LyricProject>(createEmptyProject())
   const currentLineIndex = ref(0)
@@ -31,15 +38,71 @@ export const useProjectStore = defineStore('project', () => {
   const tokenSelected = ref(true)
   const dirty = ref(false)
   const timingFinished = ref(false)
+  const lineTimingClipboard = ref<LineTimingClipboard | null>(null)
   const activeLine = computed(() => project.value.lines[currentLineIndex.value] ?? null)
   const activeToken = computed(() =>
     tokenSelected.value ? (activeLine.value?.tokens[currentTokenIndex.value] ?? null) : null
   )
+  const canCopyLineTiming = computed(() =>
+    Boolean(activeLine.value?.tokens.length && activeLine.value.tokens.every((token) => token.start !== null))
+  )
+  const canPasteLineTiming = computed(() => {
+    const clipboard = lineTimingClipboard.value
+    const line = activeLine.value
+    return Boolean(
+      clipboard &&
+        line &&
+        clipboard.tokenTexts.length === line.tokens.length &&
+        clipboard.tokenTexts.every((text, index) => text === line.tokens[index]?.text)
+    )
+  })
+
+  function snapshot(): LyricProject {
+    return structuredClone(toRaw(project.value))
+  }
+
+  function restore(next: LyricProject, markDirty = true): void {
+    project.value = structuredClone(next)
+    dirty.value = markDirty
+    timingFinished.value = false
+    const lastLineIndex = Math.max(project.value.lines.length - 1, 0)
+    currentLineIndex.value = Math.min(currentLineIndex.value, lastLineIndex)
+    const tokens = project.value.lines[currentLineIndex.value]?.tokens ?? []
+    currentTokenIndex.value = Math.min(currentTokenIndex.value, Math.max(tokens.length - 1, 0))
+    tokenSelected.value = tokens.length > 0
+  }
+
+  function recordChange(label: string, before: LyricProject, after = snapshot()): void {
+    if (JSON.stringify(before) === JSON.stringify(after)) return
+    useHistoryStore().recordExecuted({
+      label,
+      execute: () => restore(after),
+      undo: () => restore(before)
+    })
+  }
+
+  function mutate(label: string, mutation: () => void): void {
+    const before = snapshot()
+    mutation()
+    recordChange(label, before)
+  }
 
   function setAudio(audio: AudioSource): void {
-    project.value.audio = audio
-    project.value.updatedAt = Date.now()
-    dirty.value = true
+    mutate('设置音频', () => {
+      project.value.audio = audio
+      project.value.updatedAt = Date.now()
+      dirty.value = true
+    })
+  }
+
+  function setProjectName(name: string): void {
+    const normalized = name.trim()
+    if (!normalized || normalized === project.value.name) return
+    mutate('重命名工程', () => {
+      project.value.name = normalized
+      project.value.updatedAt = Date.now()
+      dirty.value = true
+    })
   }
 
   function setAudioDuration(duration: number): void {
@@ -49,14 +112,16 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function importLyrics(lines: LyricLine[], tokenizer: TokenizerMode): void {
-    project.value.lines = lines
-    project.value.settings.tokenizer = tokenizer
-    project.value.updatedAt = Date.now()
-    currentLineIndex.value = 0
-    currentTokenIndex.value = 0
-    tokenSelected.value = lines.length > 0
-    timingFinished.value = false
-    dirty.value = true
+    mutate('导入歌词', () => {
+      project.value.lines = lines
+      project.value.settings.tokenizer = tokenizer
+      project.value.updatedAt = Date.now()
+      currentLineIndex.value = 0
+      currentTokenIndex.value = 0
+      tokenSelected.value = lines.length > 0
+      timingFinished.value = false
+      dirty.value = true
+    })
   }
 
   function selectToken(lineIndex: number, tokenIndex: number): void {
@@ -105,6 +170,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function markCurrentToken(time: number): void {
     if (!activeToken.value) return
+    const before = snapshot()
     const result = markTokenAtTime(project.value.lines, currentCursor(), time)
     if (!result) return
     currentLineIndex.value = result.cursor.lineIndex
@@ -112,12 +178,14 @@ export const useProjectStore = defineStore('project', () => {
     timingFinished.value = result.finished
     project.value.updatedAt = Date.now()
     dirty.value = true
+    recordChange('记录 Token 时间', before)
   }
 
   function setTokenBoundary(boundary: 'start' | 'end', time: number | null): void {
     const token = activeToken.value
     if (!token || (time !== null && (!Number.isFinite(time) || time < 0))) return
 
+    const before = snapshot()
     if (boundary === 'start') {
       token.start = time
       if (time === null) token.end = null
@@ -129,9 +197,11 @@ export const useProjectStore = defineStore('project', () => {
     project.value.updatedAt = Date.now()
     dirty.value = true
     timingFinished.value = false
+    recordChange('调整 Token 边界', before)
   }
 
-  function applyTokenTimingUpdates(updates: TokenTimingUpdate[]): void {
+  function applyTokenTimingUpdates(updates: TokenTimingUpdate[], recordHistory = true): void {
+    const before = recordHistory ? snapshot() : null
     let changed = false
     for (const update of updates) {
       const token = project.value.lines[update.lineIndex]?.tokens[update.tokenIndex]
@@ -144,6 +214,7 @@ export const useProjectStore = defineStore('project', () => {
     project.value.updatedAt = Date.now()
     dirty.value = true
     timingFinished.value = false
+    if (before) recordChange('调整时间', before)
   }
 
   function nudgeActiveToken(delta: number): void {
@@ -226,9 +297,124 @@ export const useProjectStore = defineStore('project', () => {
 
   function setTimingOffset(offsetMs: number): void {
     if (!Number.isFinite(offsetMs)) return
-    project.value.settings.timingOffsetMs = Math.round(Math.min(Math.max(offsetMs, -5000), 5000))
+    mutate('调整时间偏移', () => {
+      project.value.settings.timingOffsetMs = Math.round(Math.min(Math.max(offsetMs, -5000), 5000))
+      project.value.updatedAt = Date.now()
+      dirty.value = true
+    })
+  }
+
+  function applyAutomaticTiming(duration: number): boolean {
+    const updates = createAutomaticTiming(project.value.lines, duration)
+    if (updates.length === 0) return false
+    const before = snapshot()
+    for (const update of updates) {
+      const token = project.value.lines[update.lineIndex]?.tokens[update.tokenIndex]
+      if (!token) continue
+      token.start = update.start
+      token.end = update.end
+    }
     project.value.updatedAt = Date.now()
     dirty.value = true
+    timingFinished.value = true
+    recordChange('智能打轴', before)
+    return true
+  }
+
+  function copyActiveLineTiming(): boolean {
+    const line = activeLine.value
+    const firstStart = line?.tokens[0]?.start
+    if (!line || firstStart === null || firstStart === undefined || !canCopyLineTiming.value) return false
+    lineTimingClipboard.value = {
+      tokenTexts: line.tokens.map((token) => token.text),
+      timings: line.tokens.map((token) => ({
+        startOffset: (token.start ?? firstStart) - firstStart,
+        endOffset: token.end === null ? null : token.end - firstStart
+      }))
+    }
+    return true
+  }
+
+  function pasteLineTimingAt(time: number): boolean {
+    const line = activeLine.value
+    const clipboard = lineTimingClipboard.value
+    if (!line || !clipboard || !canPasteLineTiming.value || !Number.isFinite(time) || time < 0) return false
+    mutate('粘贴整句时间', () => {
+      for (let index = 0; index < line.tokens.length; index += 1) {
+        const token = line.tokens[index]
+        const timing = clipboard.timings[index]
+        if (!token || !timing) continue
+        token.start = time + timing.startOffset
+        token.end = timing.endOffset === null ? null : time + timing.endOffset
+      }
+      project.value.updatedAt = Date.now()
+      dirty.value = true
+      timingFinished.value = false
+    })
+    return true
+  }
+
+  function splitActiveToken(parts: string[]): boolean {
+    const line = activeLine.value
+    const token = activeToken.value
+    const normalized = parts.map((part) => part.trim()).filter(Boolean)
+    if (!line || !token || normalized.length < 2 || normalized.join('') !== token.text) return false
+
+    const before = snapshot()
+    const duration =
+      token.start !== null && token.end !== null ? Math.max(0, token.end - token.start) : null
+    const replacements: LyricToken[] = normalized.map((text, index) => {
+      const start =
+        token.start === null ? null : duration === null ? (index === 0 ? token.start : null) : token.start + (duration * index) / normalized.length
+      const end =
+        token.start === null || duration === null
+          ? null
+          : token.start + (duration * (index + 1)) / normalized.length
+      return { id: crypto.randomUUID(), text, start, end }
+    })
+    line.tokens.splice(currentTokenIndex.value, 1, ...replacements)
+    currentTokenIndex.value = Math.min(currentTokenIndex.value, line.tokens.length - 1)
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+    recordChange('拆分 Token', before)
+    return true
+  }
+
+  function mergeActiveToken(direction: -1 | 1): boolean {
+    const line = activeLine.value
+    if (!line || !activeToken.value) return false
+    const leftIndex = direction === -1 ? currentTokenIndex.value - 1 : currentTokenIndex.value
+    const left = line.tokens[leftIndex]
+    const right = line.tokens[leftIndex + 1]
+    if (!left || !right) return false
+
+    const before = snapshot()
+    const starts = [left.start, right.start].filter((value): value is number => value !== null)
+    const ends = [left.end, right.end].filter((value): value is number => value !== null)
+    const merged: LyricToken = {
+      id: left.id,
+      text: left.text + right.text,
+      start: starts.length ? Math.min(...starts) : null,
+      end: ends.length ? Math.max(...ends) : null
+    }
+    line.tokens.splice(leftIndex, 2, merged)
+    currentTokenIndex.value = leftIndex
+    tokenSelected.value = true
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+    recordChange('合并 Token', before)
+    return true
+  }
+
+  function loadProject(next: LyricProject): void {
+    restore(next, false)
+    useHistoryStore().clear()
+  }
+
+  function markSaved(): void {
+    dirty.value = false
   }
 
   return {
@@ -239,7 +425,10 @@ export const useProjectStore = defineStore('project', () => {
     timingFinished,
     activeLine,
     activeToken,
+    canCopyLineTiming,
+    canPasteLineTiming,
     setAudio,
+    setProjectName,
     setAudioDuration,
     importLyrics,
     selectToken,
@@ -251,6 +440,15 @@ export const useProjectStore = defineStore('project', () => {
     applyTokenTimingUpdates,
     nudgeActiveToken,
     nudgeSelection,
-    setTimingOffset
+    applyAutomaticTiming,
+    copyActiveLineTiming,
+    pasteLineTimingAt,
+    splitActiveToken,
+    mergeActiveToken,
+    setTimingOffset,
+    loadProject,
+    markSaved,
+    snapshot,
+    recordChange
   }
 })
