@@ -13,6 +13,8 @@ export const IPC_CHANNELS = {
   openRecentProject: 'project:open-recent',
   loadLastProject: 'project:load-last',
   setProjectDirty: 'project:set-dirty',
+  requestAppClose: 'app:request-close',
+  confirmAppClose: 'app:confirm-close',
   exportLyrics: 'lyrics:export',
   loadExportTemplates: 'export-templates:load',
   saveExportTemplates: 'export-templates:save',
@@ -27,7 +29,18 @@ export interface AudioFileSelection {
 }
 
 export interface DesktopApi {
-  platform: 'aix' | 'android' | 'darwin' | 'freebsd' | 'haiku' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'
+  platform:
+    | 'aix'
+    | 'android'
+    | 'darwin'
+    | 'freebsd'
+    | 'haiku'
+    | 'linux'
+    | 'openbsd'
+    | 'sunos'
+    | 'win32'
+    | 'cygwin'
+    | 'netbsd'
   onMenuAction: (listener: (action: string) => void) => () => void
   ping: () => Promise<string>
   selectAudio: () => Promise<AudioFileSelection | null>
@@ -40,6 +53,8 @@ export interface DesktopApi {
   openRecentProject: (path: string) => Promise<ProjectFileResult | null>
   loadLastProject: () => Promise<ProjectFileResult | null>
   setProjectDirty: (dirty: boolean) => void
+  onAppCloseRequested: (listener: () => void) => () => void
+  confirmAppClose: () => void
   exportLyrics: (content: string, extension: string, projectName: string) => Promise<string | null>
   loadExportTemplates: () => Promise<ExportTemplate[]>
   saveExportTemplates: (templates: ExportTemplate[]) => Promise<void>

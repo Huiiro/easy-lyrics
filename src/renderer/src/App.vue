@@ -8,6 +8,7 @@ import LyricsPreview from '@renderer/components/LyricsPreview.vue'
 import ExportDialog from '@renderer/components/ExportDialog.vue'
 import SettingsDialog from '@renderer/components/SettingsDialog.vue'
 import TokenInspector from '@renderer/components/TokenInspector.vue'
+import UnsavedChangesDialog from '@renderer/components/UnsavedChangesDialog.vue'
 import Timeline from '@renderer/components/timeline/Timeline.vue'
 import { useI18n } from '@renderer/i18n'
 import { useGlobalShortcuts } from '@renderer/composables/use-global-shortcuts'
@@ -24,6 +25,8 @@ const ipcStatus = ref(t('正在检查…'))
 const importOpen = ref(false)
 const settingsOpen = ref(false)
 const exportOpen = ref(false)
+const unsavedChangesOpen = ref(false)
+const savingBeforeContinue = ref(false)
 const recentProjects = ref<RecentProject[]>([])
 const workspace = ref<HTMLElement | null>(null)
 const leftWidth = ref(28)
@@ -35,6 +38,8 @@ const player = getAudioPlayer()
 const projectPath = ref<string | null>(null)
 const fileStatus = ref('')
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
+let removeAppCloseListener: (() => void) | null = null
+let pendingAction: (() => void | Promise<void>) | null = null
 watch(
   () => projectStore.dirty,
   (dirty) => window.desktopApi?.setProjectDirty(dirty),
@@ -100,15 +105,46 @@ function resetProject(): void {
   fileStatus.value = t('新工程')
 }
 
+function continueAfterUnsavedCheck(action: () => void | Promise<void>): void {
+  if (!projectStore.dirty) {
+    void action()
+    return
+  }
+  pendingAction = action
+  unsavedChangesOpen.value = true
+}
+
+function cancelPendingAction(): void {
+  if (savingBeforeContinue.value) return
+  pendingAction = null
+  unsavedChangesOpen.value = false
+}
+
+async function runPendingAction(): Promise<void> {
+  const action = pendingAction
+  pendingAction = null
+  unsavedChangesOpen.value = false
+  if (action) await action()
+}
+
+async function saveAndRunPendingAction(): Promise<void> {
+  savingBeforeContinue.value = true
+  const saved = await saveProject()
+  savingBeforeContinue.value = false
+  if (saved) await runPendingAction()
+}
+
 function newProject(): void {
-  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要新建工程吗？'))) return
+  continueAfterUnsavedCheck(resetProject)
+}
+
+function finishClosingProject(): void {
   resetProject()
+  fileStatus.value = t('工程已关闭')
 }
 
 function closeProject(): void {
-  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要关闭工程吗？'))) return
-  resetProject()
-  fileStatus.value = t('工程已关闭')
+  continueAfterUnsavedCheck(finishClosingProject)
 }
 
 function renameProject(): void {
@@ -192,24 +228,29 @@ async function refreshRecentProjects(): Promise<void> {
   recentProjects.value = await window.desktopApi.listRecentProjects()
 }
 
-async function saveProject(): Promise<void> {
+async function saveProject(): Promise<boolean> {
   try {
     const result = await window.desktopApi.saveProject(
       projectStore.snapshot(),
       projectPath.value ?? undefined
     )
-    if (!result) return
+    if (!result) return false
     projectPath.value = result.path
     projectStore.markSaved()
     fileStatus.value = t('已保存')
     await refreshRecentProjects()
+    return true
   } catch (error) {
     fileStatus.value = error instanceof Error ? error.message : t('保存失败')
+    return false
   }
 }
 
 async function openProject(): Promise<void> {
-  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要打开其他工程吗？'))) return
+  continueAfterUnsavedCheck(openProjectFile)
+}
+
+async function openProjectFile(): Promise<void> {
   try {
     const result = await window.desktopApi.openProject()
     if (result) {
@@ -222,7 +263,10 @@ async function openProject(): Promise<void> {
 }
 
 async function openRecentProject(path: string): Promise<void> {
-  if (projectStore.dirty && !window.confirm(t('当前工程有未保存修改，仍要打开其他工程吗？'))) return
+  continueAfterUnsavedCheck(() => openRecentProjectFile(path))
+}
+
+async function openRecentProjectFile(path: string): Promise<void> {
   try {
     const result = await window.desktopApi.openRecentProject(path)
     if (!result) {
@@ -244,6 +288,7 @@ onUnmounted(() => {
   window.removeEventListener('lyrics-import', openLyricsImport)
   window.removeEventListener('lyrics-export', openLyricsExport)
   window.removeEventListener('app-command', handleNativeCommand)
+  removeAppCloseListener?.()
   if (autosaveTimer) clearInterval(autosaveTimer)
 })
 
@@ -253,6 +298,9 @@ onMounted(async () => {
   window.addEventListener('lyrics-import', openLyricsImport)
   window.addEventListener('lyrics-export', openLyricsExport)
   window.addEventListener('app-command', handleNativeCommand)
+  removeAppCloseListener = window.desktopApi.onAppCloseRequested(() => {
+    continueAfterUnsavedCheck(() => window.desktopApi.confirmAppClose())
+  })
   autosaveTimer = setInterval(async () => {
     if (!projectStore.dirty) return
     try {
@@ -268,10 +316,7 @@ onMounted(async () => {
     if (bridgeReady && import.meta.env.DEV) console.info('[Lyric Timeline] IPC bridge ready')
     await refreshRecentProjects()
     const autosave = bridgeReady ? await window.desktopApi.loadAutosave() : null
-    const restoreAutosave = Boolean(
-      autosave && window.confirm(t('发现上次自动保存的工程，是否恢复？'))
-    )
-    if (autosave && restoreAutosave) {
+    if (autosave) {
       await applyLoadedProject(autosave)
     } else if (bridgeReady) {
       const latest = await window.desktopApi.loadLastProject()
@@ -355,5 +400,13 @@ onMounted(async () => {
     />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ExportDialog :open="exportOpen" @close="exportOpen = false" />
+    <UnsavedChangesDialog
+      :open="unsavedChangesOpen"
+      :project-name="projectStore.project.name"
+      :saving="savingBeforeContinue"
+      @cancel="cancelPendingAction"
+      @discard="runPendingAction"
+      @save="saveAndRunPendingAction"
+    />
   </main>
 </template>

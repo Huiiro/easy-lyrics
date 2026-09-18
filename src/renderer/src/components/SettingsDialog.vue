@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import BaseDialog from '@renderer/components/ui/BaseDialog.vue'
+import BaseSelect from '@renderer/components/ui/BaseSelect.vue'
 import { useI18n, type AppLocale } from '@renderer/i18n'
 import { cloneExportTemplates, DEFAULT_EXPORT_TEMPLATES, type ExportTemplate } from '@shared/export'
 import {
@@ -28,6 +29,11 @@ const templateStatus = ref('')
 const selectedTemplate = computed(
   () => templates.value.find((template) => template.id === selectedTemplateId.value) ?? null
 )
+const themeOptions = computed(() => [{ value: 'dark', label: t('深色') }])
+const localeOptions = computed(() => [
+  { value: 'zh-CN', label: t('简体中文') },
+  { value: 'en-US', label: t('英语') }
+])
 
 const filteredActions = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
@@ -149,9 +155,6 @@ function displayKey(value: string): string {
     .replace('Space', 'Space')
 }
 
-function changeLocale(event: Event): void {
-  setLocale((event.target as HTMLSelectElement).value as AppLocale)
-}
 </script>
 
 <template>
@@ -334,18 +337,17 @@ function changeLocale(event: Event): void {
             <div>
               <strong>{{ t('界面主题') }}</strong><small>{{ t('当前版本针对深色工作区优化') }}</small>
             </div>
-            <select v-model="settings.theme" disabled>
-              <option value="dark">{{ t('深色') }}</option>
-            </select>
+            <BaseSelect v-model="settings.theme" :options="themeOptions" disabled />
           </div>
           <div class="settings-form-row">
             <div>
               <strong>{{ t('界面语言') }}</strong><small>{{ t('选择应用界面与原生菜单使用的语言') }}</small>
             </div>
-            <select :value="locale" @change="changeLocale">
-              <option value="zh-CN">{{ t('简体中文') }}</option>
-              <option value="en-US">{{ t('英语') }}</option>
-            </select>
+            <BaseSelect
+              :model-value="locale"
+              :options="localeOptions"
+              @update:model-value="setLocale($event as AppLocale)"
+            />
           </div>
         </section>
       </div>

@@ -21,6 +21,12 @@ const desktopApi: DesktopApi = {
   openRecentProject: (path) => ipcRenderer.invoke(IPC_CHANNELS.openRecentProject, path),
   loadLastProject: () => ipcRenderer.invoke(IPC_CHANNELS.loadLastProject),
   setProjectDirty: (dirty) => ipcRenderer.send(IPC_CHANNELS.setProjectDirty, dirty),
+  onAppCloseRequested: (listener) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC_CHANNELS.requestAppClose, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.requestAppClose, handler)
+  },
+  confirmAppClose: () => ipcRenderer.send(IPC_CHANNELS.confirmAppClose),
   exportLyrics: (content, extension, projectName) =>
     ipcRenderer.invoke(IPC_CHANNELS.exportLyrics, content, extension, projectName),
   loadExportTemplates: () => ipcRenderer.invoke(IPC_CHANNELS.loadExportTemplates),
