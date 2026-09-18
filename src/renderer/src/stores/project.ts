@@ -408,6 +408,129 @@ export const useProjectStore = defineStore('project', () => {
     return true
   }
 
+  function mergeSelectedTokens(tokenIds: string[]): boolean {
+    const selectedIds = new Set(tokenIds)
+    if (selectedIds.size < 2) return false
+
+    const matches = project.value.lines.flatMap((line, lineIndex) =>
+      line.tokens.flatMap((token, tokenIndex) =>
+        selectedIds.has(token.id) ? [{ line, lineIndex, token, tokenIndex }] : []
+      )
+    )
+    if (matches.length !== selectedIds.size || matches.some((match) => match.lineIndex !== matches[0]?.lineIndex)) {
+      return false
+    }
+    matches.sort((left, right) => left.tokenIndex - right.tokenIndex)
+    const first = matches[0]
+    if (!first || matches.some((match, index) => match.tokenIndex !== first.tokenIndex + index)) {
+      return false
+    }
+
+    const before = snapshot()
+    const starts = matches.flatMap(({ token }) => (token.start === null ? [] : [token.start]))
+    const ends = matches.flatMap(({ token }) => (token.end === null ? [] : [token.end]))
+    const merged: LyricToken = {
+      id: first.token.id,
+      text: matches.map(({ token }) => token.text).join(''),
+      start: starts.length ? Math.min(...starts) : null,
+      end: ends.length ? Math.max(...ends) : null
+    }
+    first.line.tokens.splice(first.tokenIndex, matches.length, merged)
+    currentLineIndex.value = first.lineIndex
+    currentTokenIndex.value = first.tokenIndex
+    tokenSelected.value = true
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+    recordChange('合并选中 Token', before)
+    return true
+  }
+
+  function deleteTokens(tokenIds: string[]): boolean {
+    const selectedIds = new Set(tokenIds)
+    if (!selectedIds.size) return false
+    const firstLocation = project.value.lines.flatMap((line, lineIndex) =>
+      line.tokens.flatMap((token, tokenIndex) =>
+        selectedIds.has(token.id) ? [{ lineIndex, tokenIndex }] : []
+      )
+    )[0]
+    if (!firstLocation) return false
+
+    const before = snapshot()
+    for (const line of project.value.lines) {
+      for (let tokenIndex = line.tokens.length - 1; tokenIndex >= 0; tokenIndex -= 1) {
+        const token = line.tokens[tokenIndex]
+        if (token && selectedIds.has(token.id)) line.tokens.splice(tokenIndex, 1)
+      }
+    }
+    for (let lineIndex = project.value.lines.length - 1; lineIndex >= 0; lineIndex -= 1) {
+      if (project.value.lines[lineIndex]?.tokens.length === 0) project.value.lines.splice(lineIndex, 1)
+    }
+
+    if (project.value.lines.length) {
+      currentLineIndex.value = Math.min(firstLocation.lineIndex, project.value.lines.length - 1)
+      const line = project.value.lines[currentLineIndex.value]
+      currentTokenIndex.value = Math.min(firstLocation.tokenIndex, Math.max((line?.tokens.length ?? 1) - 1, 0))
+      tokenSelected.value = Boolean(line?.tokens[currentTokenIndex.value])
+    } else {
+      currentLineIndex.value = 0
+      currentTokenIndex.value = 0
+      tokenSelected.value = false
+    }
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+    recordChange(selectedIds.size > 1 ? '删除选中 Token' : '删除 Token', before)
+    return true
+  }
+
+  function insertTokenAdjacent(direction: -1 | 1, text: string): boolean {
+    const line = activeLine.value
+    const token = activeToken.value
+    const normalized = text.trim()
+    if (!line || !token || !normalized) return false
+
+    const before = snapshot()
+    const insertIndex = currentTokenIndex.value + (direction === 1 ? 1 : 0)
+    const previous = line.tokens[insertIndex - 1]
+    const next = line.tokens[insertIndex]
+    let start: number | null = null
+    let end: number | null = null
+    if (
+      previous?.end !== null &&
+      previous?.end !== undefined &&
+      next?.start !== null &&
+      next?.start !== undefined &&
+      next.start - previous.end >= MIN_TOKEN_DURATION
+    ) {
+      start = previous.end
+      end = next.start
+    } else if (
+      token.start !== null &&
+      token.end !== null &&
+      token.end - token.start >= MIN_TOKEN_DURATION * 2
+    ) {
+      const midpoint = token.start + (token.end - token.start) / 2
+      if (direction === -1) {
+        start = token.start
+        end = midpoint
+        token.start = midpoint
+      } else {
+        start = midpoint
+        end = token.end
+        token.end = midpoint
+      }
+    }
+    line.tokens.splice(insertIndex, 0, { id: crypto.randomUUID(), text: normalized, start, end })
+    currentTokenIndex.value = insertIndex
+    tokenSelected.value = true
+    project.value.updatedAt = Date.now()
+    dirty.value = true
+    timingFinished.value = false
+    recordChange('插入 Token', before)
+    return true
+  }
+
   function loadProject(next: LyricProject): void {
     restore(next, false)
     useHistoryStore().clear()
@@ -445,6 +568,9 @@ export const useProjectStore = defineStore('project', () => {
     pasteLineTimingAt,
     splitActiveToken,
     mergeActiveToken,
+    mergeSelectedTokens,
+    deleteTokens,
+    insertTokenAdjacent,
     setTimingOffset,
     loadProject,
     markSaved,

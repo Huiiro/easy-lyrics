@@ -1,4 +1,5 @@
-import { basename, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { access, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 
 import {
@@ -20,9 +21,16 @@ import { parseProjectFile } from '../shared/project-file'
 import type { LyricProject } from '../shared/models/project'
 import { parseExportTemplates, type ExportTemplate } from '../shared/export'
 import { parseRecentProjects, prioritizeRecentProject } from '../shared/recent-projects'
+import {
+  LYRIC_TIMELINE_PROTOCOL,
+  parsePlayerSongPayload,
+  payloadPathFromUrl
+} from '../shared/integration'
+import type { IntegrationOpenResult } from '../shared/ipc'
 
 const audioFiles = new Map<string, string>()
 let projectDirty = false
+let pendingIntegration: IntegrationOpenResult | null = null
 let currentLocale: 'zh-CN' | 'en-US' = Intl.DateTimeFormat()
   .resolvedOptions()
   .locale.toLowerCase()
@@ -208,6 +216,11 @@ protocol.registerSchemesAsPrivileged([
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
+  ipcMain.handle(IPC_CHANNELS.integrationTakePending, () => {
+    const request = pendingIntegration
+    pendingIntegration = null
+    return request
+  })
   ipcMain.handle(IPC_CHANNELS.setLocale, async (_event, locale: 'zh-CN' | 'en-US') => {
     if (locale !== 'zh-CN' && locale !== 'en-US') return
     currentLocale = locale
@@ -324,6 +337,42 @@ function registerIpcHandlers(): void {
     projectDirty = false
     window.close()
   })
+}
+
+async function acceptIntegrationUrl(rawUrl: string): Promise<void> {
+  const payloadPath = payloadPathFromUrl(rawUrl)
+  if (
+    !payloadPath ||
+    !isAbsolute(payloadPath) ||
+    resolve(dirname(payloadPath)) !== resolve(tmpdir()) ||
+    !/^lyric-timeline-[\da-f-]+\.json$/iu.test(basename(payloadPath))
+  )
+    return
+  try {
+    const stat = await import('node:fs/promises').then(({ stat }) => stat(payloadPath))
+    if (stat.size > 2_000_000) throw new Error('Player payload is too large')
+    const payload = parsePlayerSongPayload(JSON.parse(await readFile(payloadPath, 'utf8')))
+    const audio = await registerAudio(payload.audioPath)
+    if (!audio) throw new Error('Player audio file is unavailable')
+    const request = { payload, audio }
+    const window = BrowserWindow.getAllWindows()[0]
+    if (window && !window.webContents.isLoading()) {
+      window.webContents.send(IPC_CHANNELS.integrationOpen, request)
+      if (window.isMinimized()) window.restore()
+      window.show()
+      window.focus()
+    } else {
+      pendingIntegration = request
+    }
+  } catch (error) {
+    console.warn('Unable to open player song', error)
+  } finally {
+    await unlink(payloadPath).catch(() => undefined)
+  }
+}
+
+function integrationUrlFromArgs(args: string[]): string | undefined {
+  return args.find((arg) => arg.startsWith(`${LYRIC_TIMELINE_PROTOCOL}://`))
 }
 
 function createWindow(): void {
@@ -465,8 +514,26 @@ async function installMacMenu(window: BrowserWindow): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) app.quit()
+
+app.on('second-instance', (_event, argv) => {
+  const url = integrationUrlFromArgs(argv)
+  if (url) void acceptIntegrationUrl(url)
+})
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  void acceptIntegrationUrl(url)
+})
+
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return
   electronApp.setAppUserModelId('com.lyric-timeline.app')
+  if (is.dev && process.defaultApp && process.argv[1]) {
+    app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL, process.execPath, [process.argv[1]])
+  } else {
+    app.setAsDefaultProtocolClient(LYRIC_TIMELINE_PROTOCOL)
+  }
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
   protocol.handle('lyric-audio', async (request) => {
@@ -483,6 +550,8 @@ app.whenReady().then(() => {
 
   registerIpcHandlers()
   createWindow()
+  const startupUrl = integrationUrlFromArgs(process.argv)
+  if (startupUrl) void acceptIntegrationUrl(startupUrl)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

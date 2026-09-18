@@ -1,5 +1,6 @@
 import type { LyricProject } from './models/project'
 import type { ExportTemplate } from './export'
+import type { PlayerSongPayload } from './integration'
 
 export const IPC_CHANNELS = {
   ping: 'app:ping',
@@ -19,7 +20,9 @@ export const IPC_CHANNELS = {
   loadExportTemplates: 'export-templates:load',
   saveExportTemplates: 'export-templates:save',
   setLocale: 'app:set-locale',
-  menuAction: 'menu:action'
+  menuAction: 'menu:action',
+  integrationTakePending: 'integration:take-pending',
+  integrationOpen: 'integration:open'
 } as const
 
 export interface AudioFileSelection {
@@ -59,6 +62,13 @@ export interface DesktopApi {
   loadExportTemplates: () => Promise<ExportTemplate[]>
   saveExportTemplates: (templates: ExportTemplate[]) => Promise<void>
   setLocale: (locale: 'zh-CN' | 'en-US') => Promise<void>
+  takePendingIntegration: () => Promise<IntegrationOpenResult | null>
+  onIntegrationOpen: (listener: (request: IntegrationOpenResult) => void) => () => void
+}
+
+export interface IntegrationOpenResult {
+  payload: PlayerSongPayload
+  audio: AudioFileSelection
 }
 
 export interface RecentProject {

@@ -225,4 +225,80 @@ describe('project store lyric selection', () => {
     ])
     expect(store.currentTokenIndex).toBe(0)
   })
+
+  it('merges a contiguous token selection in lyric order', () => {
+    const store = useProjectStore()
+    const selectedLines = structuredClone(lines)
+    selectedLines[0]!.tokens.push({ id: 'token-4', text: '呀', start: 3, end: 4 })
+    selectedLines[0]!.tokens[0]!.start = 1
+    selectedLines[0]!.tokens[0]!.end = 2
+    selectedLines[0]!.tokens[1]!.start = 2
+    selectedLines[0]!.tokens[1]!.end = 3
+    store.importLyrics(selectedLines, 'smart')
+
+    expect(store.mergeSelectedTokens(['token-4', 'token-1', 'token-2'])).toBe(true)
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { id: 'token-1', text: '你好呀', start: 1, end: 4 }
+    ])
+    expect(store.activeToken?.id).toBe('token-1')
+  })
+
+  it('does not merge a selection across lyric lines', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+
+    expect(store.mergeSelectedTokens(['token-1', 'token-3'])).toBe(false)
+    expect(store.project.lines[0]?.tokens).toHaveLength(2)
+  })
+
+  it('deletes selected tokens and selects the nearest remaining token', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+
+    expect(store.deleteTokens(['token-1', 'token-3'])).toBe(true)
+    expect(store.project.lines).toHaveLength(1)
+    expect(store.project.lines[0]?.tokens.map((token) => token.id)).toEqual(['token-2'])
+    expect(store.activeToken?.id).toBe('token-2')
+  })
+
+  it('clears selection after deleting every token', () => {
+    const store = useProjectStore()
+    store.importLyrics(structuredClone(lines), 'smart')
+
+    expect(store.deleteTokens(['token-1', 'token-2', 'token-3'])).toBe(true)
+    expect(store.project.lines).toHaveLength(0)
+    expect(store.activeToken).toBeNull()
+  })
+
+  it('inserts a token between adjacent timing intervals', () => {
+    const store = useProjectStore()
+    const timedLines = structuredClone(lines)
+    timedLines[0]!.tokens[0]!.start = 1
+    timedLines[0]!.tokens[0]!.end = 2
+    timedLines[0]!.tokens[1]!.start = 3
+    timedLines[0]!.tokens[1]!.end = 4
+    store.importLyrics(timedLines, 'smart')
+
+    expect(store.insertTokenAdjacent(1, '啊')).toBe(true)
+    expect(store.project.lines[0]?.tokens).toMatchObject([
+      { text: '你', start: 1, end: 2 },
+      { text: '啊', start: 2, end: 3 },
+      { text: '好', start: 3, end: 4 }
+    ])
+    expect(store.activeToken?.text).toBe('啊')
+  })
+
+  it('inserts beside a token by sharing its timing interval when there is no gap', () => {
+    const store = useProjectStore()
+    const timedLines = structuredClone(lines)
+    timedLines[0]!.tokens[0]!.start = 1
+    timedLines[0]!.tokens[0]!.end = 3
+    store.importLyrics(timedLines, 'smart')
+
+    expect(store.insertTokenAdjacent(-1, '新')).toBe(true)
+    expect(store.project.lines[0]?.tokens.slice(0, 2)).toMatchObject([
+      { text: '新', start: 1, end: 2 },
+      { text: '你', start: 2, end: 3 }
+    ])
+  })
 })

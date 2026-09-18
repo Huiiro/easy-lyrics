@@ -130,9 +130,25 @@ export function useGlobalShortcuts(): void {
   async function handleKeydown(event: KeyboardEvent): Promise<void> {
     if (
       isEditableTarget(event.target) ||
-      (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]'))
+      (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]')) ||
+      document.querySelector('[role="dialog"]')
     )
       return
+
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const tokenIds = timelineStore.selectedTokenIds.length
+        ? timelineStore.selectedTokenIds
+        : projectStore.activeToken
+          ? [projectStore.activeToken.id]
+          : []
+      if (tokenIds.length) {
+        event.preventDefault()
+        if (projectStore.deleteTokens(tokenIds)) {
+          timelineStore.selectedTokenIds = projectStore.activeToken ? [projectStore.activeToken.id] : []
+        }
+      }
+      return
+    }
 
     const action = shortcutActions.find(({ id }) => {
       const shortcut = settingsStore.shortcuts[id]

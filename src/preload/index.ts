@@ -32,7 +32,16 @@ const desktopApi: DesktopApi = {
   loadExportTemplates: () => ipcRenderer.invoke(IPC_CHANNELS.loadExportTemplates),
   saveExportTemplates: (templates) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveExportTemplates, templates),
-  setLocale: (locale) => ipcRenderer.invoke(IPC_CHANNELS.setLocale, locale)
+  setLocale: (locale) => ipcRenderer.invoke(IPC_CHANNELS.setLocale, locale),
+  takePendingIntegration: () => ipcRenderer.invoke(IPC_CHANNELS.integrationTakePending),
+  onIntegrationOpen: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      request: Parameters<typeof listener>[0]
+    ): void => listener(request)
+    ipcRenderer.on(IPC_CHANNELS.integrationOpen, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.integrationOpen, handler)
+  }
 }
 
 contextBridge.exposeInMainWorld('desktopApi', desktopApi)

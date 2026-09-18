@@ -8,6 +8,7 @@ import LyricsPreview from '@renderer/components/LyricsPreview.vue'
 import ExportDialog from '@renderer/components/ExportDialog.vue'
 import SettingsDialog from '@renderer/components/SettingsDialog.vue'
 import TokenInspector from '@renderer/components/TokenInspector.vue'
+import TokenStructureDialog from '@renderer/components/TokenStructureDialog.vue'
 import UnsavedChangesDialog from '@renderer/components/UnsavedChangesDialog.vue'
 import Timeline from '@renderer/components/timeline/Timeline.vue'
 import { useI18n } from '@renderer/i18n'
@@ -16,7 +17,7 @@ import { getAudioPlayer } from '@renderer/services/audio-player'
 import { createLyricLines, lyricLinesToSource } from '@renderer/services/tokenizer'
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
-import type { ProjectFileResult, RecentProject } from '@shared/ipc'
+import type { IntegrationOpenResult, ProjectFileResult, RecentProject } from '@shared/ipc'
 import { createEmptyProject, type TokenizerMode } from '@shared/models/project'
 
 const { locale, setLocale, t } = useI18n()
@@ -39,6 +40,7 @@ const projectPath = ref<string | null>(null)
 const fileStatus = ref('')
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
 let removeAppCloseListener: (() => void) | null = null
+let removeIntegrationListener: (() => void) | null = null
 let pendingAction: (() => void | Promise<void>) | null = null
 watch(
   () => projectStore.dirty,
@@ -92,6 +94,29 @@ function endResize(event: PointerEvent): void {
 
 function importLyrics(payload: { text: string; mode: TokenizerMode }): void {
   projectStore.importLyrics(createLyricLines(payload.text, payload.mode), payload.mode)
+}
+
+function applyPlayerSong(request: IntegrationOpenResult): void {
+  const { payload, audio } = request
+  const project = createEmptyProject()
+  project.name = payload.title || audio.name.replace(/\.[^.]+$/u, '')
+  project.audio = { path: audio.path, name: audio.name, duration: null }
+  project.metadata = {
+    title: payload.title,
+    artist: payload.artist,
+    album: payload.album
+  }
+  project.lines = createLyricLines(payload.lyrics, project.settings.tokenizer)
+  project.updatedAt = Date.now()
+  projectStore.loadProject(project)
+  projectStore.dirty = true
+  projectPath.value = null
+  loadAudio(audio)
+  fileStatus.value = t('已从播放器打开')
+}
+
+function openPlayerSong(request: IntegrationOpenResult): void {
+  continueAfterUnsavedCheck(() => applyPlayerSong(request))
 }
 
 function resetProject(): void {
@@ -289,6 +314,7 @@ onUnmounted(() => {
   window.removeEventListener('lyrics-export', openLyricsExport)
   window.removeEventListener('app-command', handleNativeCommand)
   removeAppCloseListener?.()
+  removeIntegrationListener?.()
   if (autosaveTimer) clearInterval(autosaveTimer)
 })
 
@@ -301,6 +327,7 @@ onMounted(async () => {
   removeAppCloseListener = window.desktopApi.onAppCloseRequested(() => {
     continueAfterUnsavedCheck(() => window.desktopApi.confirmAppClose())
   })
+  removeIntegrationListener = window.desktopApi.onIntegrationOpen(openPlayerSong)
   autosaveTimer = setInterval(async () => {
     if (!projectStore.dirty) return
     try {
@@ -315,6 +342,11 @@ onMounted(async () => {
     ipcStatus.value = bridgeReady ? 'Main / Preload / Renderer OK' : t('响应异常')
     if (bridgeReady && import.meta.env.DEV) console.info('[Lyric Timeline] IPC bridge ready')
     await refreshRecentProjects()
+    const integration = bridgeReady ? await window.desktopApi.takePendingIntegration() : null
+    if (integration) {
+      applyPlayerSong(integration)
+      return
+    }
     const autosave = bridgeReady ? await window.desktopApi.loadAutosave() : null
     if (autosave) {
       await applyLoadedProject(autosave)
@@ -400,6 +432,7 @@ onMounted(async () => {
     />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ExportDialog :open="exportOpen" @close="exportOpen = false" />
+    <TokenStructureDialog />
     <UnsavedChangesDialog
       :open="unsavedChangesOpen"
       :project-name="projectStore.project.name"

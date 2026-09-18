@@ -31,7 +31,13 @@ type Interaction =
   | { kind: 'seek' }
   | { kind: 'pan'; lastX: number }
   | {
-      kind: 'token-move' | 'token-left' | 'token-right' | 'line-move'
+      kind: 'marquee'
+      startX: number
+      startY: number
+      additiveIds: string[]
+    }
+  | {
+      kind: 'token-move' | 'token-group-move' | 'token-left' | 'token-right' | 'line-move'
       lineIndex: number
       tokenIndex: number
       originTime: number
@@ -40,6 +46,8 @@ type Interaction =
     }
 
 let interaction: Interaction | null = null
+const selectionRect = ref<{ x: number; y: number; width: number; height: number } | null>(null)
+const contextMenu = ref<{ x: number; y: number; lineIndex: number; tokenIndex: number } | null>(null)
 
 const player = getAudioPlayer()
 const playerStore = usePlayerStore()
@@ -55,6 +63,21 @@ const loopRange = computed(() => {
   return { start: token.start, end: token.end }
 })
 
+const canMergeSelection = computed(() => {
+  if (timelineStore.selectedTokenIds.length < 2) return false
+  const selectedIds = new Set(timelineStore.selectedTokenIds)
+  const locations = projectStore.project.lines.flatMap((line, lineIndex) =>
+    line.tokens.flatMap((token, tokenIndex) =>
+      selectedIds.has(token.id) ? [{ lineIndex, tokenIndex }] : []
+    )
+  )
+  if (locations.length !== selectedIds.size || locations.some((item) => item.lineIndex !== locations[0]?.lineIndex)) {
+    return false
+  }
+  locations.sort((left, right) => left.tokenIndex - right.tokenIndex)
+  return locations.every((item, index) => item.tokenIndex === (locations[0]?.tokenIndex ?? 0) + index)
+})
+
 let resizeObserver: ResizeObserver | null = null
 let waveformAbort: AbortController | null = null
 let renderer: TimelineRenderer | null = null
@@ -63,7 +86,7 @@ function duration(): number {
   return playerStore.duration || timelineStore.waveform?.duration || 0
 }
 
-function pointerX(event: PointerEvent | WheelEvent): number {
+function pointerX(event: MouseEvent | PointerEvent | WheelEvent): number {
   return event.clientX - (canvas.value?.getBoundingClientRect().left ?? 0)
 }
 
@@ -137,7 +160,24 @@ function previewEdit(
     end: number | null
   }> = []
 
-  if (edit.kind === 'line-move') {
+  if (edit.kind === 'token-group-move') {
+    const selected = edit.snapshots.filter((token) => timelineStore.selectedTokenIds.includes(token.id))
+    let delta = clampGroupDelta(selected, rawDelta, duration() || Number.POSITIVE_INFINITY)
+    const boundaries = selected.flatMap((token) =>
+      token.start === null ? [] : token.end === null ? [token.start] : [token.start, token.end]
+    )
+    const snapped = bestSnapDelta(boundaries, delta, snapCandidates(edit.snapshots, new Set(selected.map((token) => token.id))))
+    delta = clampGroupDelta(selected, snapped.delta, duration() || Number.POSITIVE_INFINITY)
+    timelineStore.snapGuideTime = delta === snapped.delta ? snapped.guide : null
+    for (const token of selected) {
+      updates.push({
+        lineIndex: token.lineIndex,
+        tokenIndex: token.tokenIndex,
+        start: token.start === null ? null : token.start + delta,
+        end: token.end === null ? null : token.end + delta
+      })
+    }
+  } else if (edit.kind === 'line-move') {
     let delta = clampGroupDelta(lineTokens, rawDelta, duration() || Number.POSITIVE_INFINITY)
     const boundaries = lineTokens.flatMap((token) =>
       token.start === null ? [] : token.end === null ? [token.start] : [token.start, token.end]
@@ -217,21 +257,43 @@ function previewEdit(
 function handlePointerDown(event: PointerEvent): void {
   if (!canvas.value || !playerStore.source) return
   const x = pointerX(event)
-  if (event.button === 1 || (event.button === 0 && event.shiftKey)) {
+  contextMenu.value = null
+  if (event.button === 1 || (event.button === 0 && event.shiftKey && event.clientY - canvas.value.getBoundingClientRect().top <= 27)) {
     timelineStore.followPlayback = false
     interaction = { kind: 'pan', lastX: x }
   } else if (event.button === 0) {
     const hit = renderer?.hitTest(x, event.clientY - canvas.value.getBoundingClientRect().top)
-    if (hit?.lineIndex !== undefined && hit.tokenIndex !== undefined) {
+    if (hit?.type === 'playhead' || (!hit && event.clientY - canvas.value.getBoundingClientRect().top <= 27)) {
+      interaction = { kind: 'seek' }
+      seekAt(x)
+    } else if (hit?.lineIndex !== undefined && hit.tokenIndex !== undefined) {
       projectStore.selectToken(hit.lineIndex, hit.tokenIndex)
       timelineStore.requestLyricsFocus(hit.lineIndex)
-      timelineStore.selectedTokenId = hit.id
+      const toggle = event.metaKey || event.ctrlKey || event.shiftKey
+      const selected = timelineStore.selectedTokenIds.includes(hit.id)
+      if (toggle) {
+        timelineStore.selectedTokenIds = selected
+          ? timelineStore.selectedTokenIds.filter((id) => id !== hit.id)
+          : [...timelineStore.selectedTokenIds, hit.id]
+      } else if (!selected) {
+        timelineStore.selectedTokenIds = [hit.id]
+      }
+      if (!timelineStore.selectedTokenIds.length) {
+        projectStore.clearTokenSelection()
+        return
+      }
+      if (toggle && selected) {
+        event.preventDefault()
+        return
+      }
       const kind =
         hit.type === 'token-left'
           ? 'token-left'
           : hit.type === 'token-right'
             ? 'token-right'
-            : timelineStore.editMode === 'line'
+            : timelineStore.selectedTokenIds.length > 1
+              ? 'token-group-move'
+              : timelineStore.editMode === 'line'
               ? 'line-move'
               : 'token-move'
       interaction = {
@@ -243,10 +305,11 @@ function handlePointerDown(event: PointerEvent): void {
         projectBefore: projectStore.snapshot()
       }
     } else {
-      projectStore.clearTokenSelection()
-      timelineStore.selectedTokenId = null
-      interaction = { kind: 'seek' }
-      seekAt(x)
+      const y = event.clientY - canvas.value.getBoundingClientRect().top
+      const additiveIds = event.metaKey || event.ctrlKey || event.shiftKey ? [...timelineStore.selectedTokenIds] : []
+      if (!additiveIds.length) clearTokenSelection()
+      interaction = { kind: 'marquee', startX: x, startY: y, additiveIds }
+      selectionRect.value = { x, y, width: 0, height: 0 }
     }
   } else {
     return
@@ -263,6 +326,25 @@ function handlePointerMove(event: PointerEvent): void {
     const x = pointerX(event)
     timelineStore.panByPixels(x - interaction.lastX, duration())
     interaction.lastX = x
+  } else if (interaction.kind === 'marquee') {
+    const x = pointerX(event)
+    const y = event.clientY - (canvas.value?.getBoundingClientRect().top ?? 0)
+    selectionRect.value = {
+      x: Math.min(interaction.startX, x),
+      y: Math.min(interaction.startY, y),
+      width: Math.abs(x - interaction.startX),
+      height: Math.abs(y - interaction.startY)
+    }
+    const rect = selectionRect.value
+    const ids = timingSnapshots().filter((token) => {
+      if (token.start === null) return false
+      const end = token.end ?? token.start + 0.12
+      const x1 = (token.start - timelineStore.startTime) * timelineStore.pixelsPerSecond
+      const x2 = (end - timelineStore.startTime) * timelineStore.pixelsPerSecond
+      const tokenY = canvasHeight.value - 42
+      return x2 >= rect.x && x1 <= rect.x + rect.width && tokenY + 27 >= rect.y && tokenY <= rect.y + rect.height
+    }).map((token) => token.id)
+    timelineStore.selectedTokenIds = [...new Set([...interaction.additiveIds, ...ids])]
   } else {
     previewEdit(event, interaction)
   }
@@ -275,12 +357,59 @@ function handlePointerUp(event: PointerEvent): void {
     projectStore.recordChange('拖动时间轴', interaction.projectBefore)
   }
   interaction = null
+  selectionRect.value = null
   timelineStore.snapGuideTime = null
 }
 
 function clearTokenSelection(): void {
   projectStore.clearTokenSelection()
-  timelineStore.selectedTokenId = null
+  timelineStore.selectedTokenIds = []
+}
+
+function handleContextMenu(event: MouseEvent): void {
+  if (!canvas.value) return
+  const hit = renderer?.hitTest(pointerX(event), event.clientY - canvas.value.getBoundingClientRect().top)
+  if (hit?.lineIndex === undefined || hit.tokenIndex === undefined) {
+    contextMenu.value = null
+    return
+  }
+  projectStore.selectToken(hit.lineIndex, hit.tokenIndex)
+  if (!timelineStore.selectedTokenIds.includes(hit.id)) timelineStore.selectedTokenIds = [hit.id]
+  contextMenu.value = { x: event.clientX, y: event.clientY, lineIndex: hit.lineIndex, tokenIndex: hit.tokenIndex }
+}
+
+function mergeFromMenu(direction: -1 | 1): void {
+  projectStore.mergeActiveToken(direction)
+  timelineStore.selectedTokenIds = projectStore.activeToken ? [projectStore.activeToken.id] : []
+  contextMenu.value = null
+}
+
+function mergeSelectionFromMenu(): void {
+  if (projectStore.mergeSelectedTokens(timelineStore.selectedTokenIds)) {
+    timelineStore.selectedTokenIds = projectStore.activeToken ? [projectStore.activeToken.id] : []
+  }
+  contextMenu.value = null
+}
+
+function openTokenStructureDialog(mode: 'split' | 'insert-before' | 'insert-after'): void {
+  contextMenu.value = null
+  window.dispatchEvent(new CustomEvent('token-structure-dialog', { detail: mode }))
+}
+
+function deleteSelectedTokens(): void {
+  const tokenIds = timelineStore.selectedTokenIds.length
+    ? [...timelineStore.selectedTokenIds]
+    : projectStore.activeToken
+      ? [projectStore.activeToken.id]
+      : []
+  contextMenu.value = null
+  if (projectStore.deleteTokens(tokenIds)) {
+    timelineStore.selectedTokenIds = projectStore.activeToken ? [projectStore.activeToken.id] : []
+  }
+}
+
+function dismissContextMenu(): void {
+  contextMenu.value = null
 }
 
 function handleWheel(event: WheelEvent): void {
@@ -398,6 +527,8 @@ watchEffect(() => {
     waveform: timelineStore.waveform,
     lines: projectStore.project.lines,
     activeTokenId: projectStore.activeToken?.id ?? null,
+    selectedTokenIds: timelineStore.selectedTokenIds,
+    selectionRect: selectionRect.value,
     snapGuideTime: timelineStore.snapGuideTime,
     loopStart: timelineStore.loopEnabled ? timelineStore.loopStart : null,
     loopEnd: timelineStore.loopEnabled ? timelineStore.loopEnd : null
@@ -405,6 +536,7 @@ watchEffect(() => {
 })
 
 onMounted(() => {
+  window.addEventListener('pointerdown', dismissContextMenu)
   if (!container.value) return
   resizeObserver = new ResizeObserver(([entry]) => {
     if (entry) {
@@ -416,6 +548,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('pointerdown', dismissContextMenu)
   resizeObserver?.disconnect()
   waveformAbort?.abort()
 })
@@ -511,9 +644,39 @@ onUnmounted(() => {
         @pointerup="handlePointerUp"
         @pointercancel="handlePointerUp"
         @wheel.prevent="handleWheel"
-        @contextmenu.prevent="clearTokenSelection"
+        @contextmenu.prevent="handleContextMenu"
       />
       <div v-if="!playerStore.source" class="timeline-empty">{{ t('导入歌曲后显示波形与时间轴') }}</div>
+    </div>
+    <div
+      v-if="contextMenu"
+      class="timeline-context-menu"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @pointerdown.stop
+    >
+      <button type="button" :disabled="contextMenu.tokenIndex === 0" @click="mergeFromMenu(-1)">{{ t('合并前项') }}</button>
+      <button
+        type="button"
+        :disabled="contextMenu.tokenIndex >= (projectStore.project.lines[contextMenu.lineIndex]?.tokens.length ?? 0) - 1"
+        @click="mergeFromMenu(1)"
+      >
+        {{ t('合并后项') }}
+      </button>
+      <button type="button" :disabled="!canMergeSelection" @click="mergeSelectionFromMenu">
+        {{ t('合并选中项') }}
+      </button>
+      <button type="button" @click="openTokenStructureDialog('split')">{{ t('拆分 Token') }}</button>
+      <hr />
+      <button type="button" @click="openTokenStructureDialog('insert-before')">
+        {{ t('在前面插入 Token') }}
+      </button>
+      <button type="button" @click="openTokenStructureDialog('insert-after')">
+        {{ t('在后面插入 Token') }}
+      </button>
+      <hr />
+      <button type="button" class="danger" @click="deleteSelectedTokens">
+        {{ timelineStore.selectedTokenIds.length > 1 ? t('删除选中 Token') : t('删除 Token') }}
+      </button>
     </div>
     <footer class="timeline-footer">
       <p class="timeline-help">

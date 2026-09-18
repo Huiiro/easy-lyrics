@@ -1218,6 +1218,44 @@ button {
   font-size: 12px;
   pointer-events: none;
 }
+.timeline-context-menu {
+  position: fixed;
+  z-index: 1000;
+  transform: translateY(calc(-100% - 4px));
+  display: grid;
+  min-width: 170px;
+  padding: 5px;
+  border: 1px solid #3b4852;
+  border-radius: 7px;
+  background: #171e24;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+.timeline-context-menu button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 4px;
+  color: #c4ced6;
+  background: transparent;
+  font-size: 11px;
+  text-align: left;
+}
+.timeline-context-menu button:hover:not(:disabled) {
+  color: #effff9;
+  background: rgb(114 228 189 / 12%);
+}
+.timeline-context-menu button:disabled {
+  color: #53606a;
+}
+.timeline-context-menu button.danger,
+.token-structure-actions button.danger {
+  color: #ff8791;
+}
+.timeline-context-menu hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid #303a43;
+}
 .timeline-footer {
   display: flex;
   flex: none;
@@ -1645,6 +1683,72 @@ input[type='range'] {
 }
 .import-dialog {
   padding: 22px;
+}
+.token-structure-dialog {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+.token-structure-dialog-body {
+  display: grid;
+  gap: 10px;
+  min-height: 105px;
+}
+.token-structure-dialog-body > p:first-child {
+  margin: 0;
+  color: #8997a2;
+  font-size: 11px;
+}
+.token-structure-dialog-body input {
+  padding: 9px 10px;
+  border: 1px solid #3b4852;
+  border-radius: 5px;
+  color: #e5eee9;
+  outline: none;
+  background: #0d1317;
+}
+.token-structure-dialog-body input:focus {
+  border-color: #72e4bd;
+}
+.token-split-marker {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 18px 14px;
+  overflow-x: auto;
+  border: 1px solid #3b4852;
+  border-radius: 6px;
+  color: #e5eee9;
+  background: #0d1317;
+  font-size: 18px;
+  white-space: nowrap;
+}
+.token-split-marker > span {
+  flex: none;
+}
+.token-split-marker .token-split-boundary {
+  position: relative;
+  width: 14px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.token-split-marker .token-split-boundary::after {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: #34414a;
+  content: '';
+}
+.token-split-marker .token-split-boundary:hover::after,
+.token-split-marker .token-split-boundary.active::after {
+  background: #72e4bd;
+  box-shadow: 0 0 0 3px rgb(114 228 189 / 15%);
 }
 .dialog-header {
   display: flex;

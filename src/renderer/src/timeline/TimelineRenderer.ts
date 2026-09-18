@@ -11,6 +11,8 @@ export interface TimelineRenderState {
   waveform: WaveformData | null
   lines: LyricLine[]
   activeTokenId: string | null
+  selectedTokenIds: string[]
+  selectionRect: { x: number; y: number; width: number; height: number } | null
   snapGuideTime: number | null
   loopStart: number | null
   loopEnd: number | null
@@ -44,6 +46,7 @@ export class TimelineRenderer {
     this.drawWaveform(state)
     this.drawLoopRange(state)
     this.drawTokens(state)
+    this.drawSelectionRect(state)
     this.drawSnapGuide(state)
     this.drawPlayhead(state)
     this.hitTester.setRegions(this.hitRegions)
@@ -149,6 +152,7 @@ export class TimelineRenderer {
 
         const width = Math.max(3, x2 - x1)
         const active = token.id === state.activeTokenId
+        const selected = state.selectedTokenIds?.includes(token.id) ?? active
         this.hitRegions.push({
           type: 'token-body',
           id: token.id,
@@ -159,9 +163,9 @@ export class TimelineRenderer {
           width,
           height
         })
-        context.fillStyle = active ? '#72e4bd' : '#203d35'
-        context.strokeStyle = active ? '#b4f8df' : '#3c7463'
-        context.lineWidth = 1
+        context.fillStyle = selected ? '#72e4bd' : '#203d35'
+        context.strokeStyle = selected ? '#e3fff5' : '#3c7463'
+        context.lineWidth = selected ? 1.5 : 1
         context.beginPath()
         context.roundRect(x1, y, width, height, 4)
         context.fill()
@@ -172,14 +176,14 @@ export class TimelineRenderer {
           context.beginPath()
           context.rect(x1 + 3, y, width - 6, height)
           context.clip()
-          context.fillStyle = active ? '#0b1713' : '#b2c9c1'
+          context.fillStyle = selected ? '#0b1713' : '#b2c9c1'
           context.font = '11px system-ui, sans-serif'
           context.textBaseline = 'middle'
           context.fillText(token.text, x1 + 6, y + height / 2)
           context.restore()
         }
 
-        if (active) {
+        if (active && selected && (state.selectedTokenIds?.length ?? 1) === 1) {
           const handleWidth = 8
           context.fillStyle = '#e3fff5'
           context.fillRect(x1 - handleWidth / 2, y + 3, handleWidth, height - 6)
@@ -209,6 +213,19 @@ export class TimelineRenderer {
         }
       }
     }
+  }
+
+  private drawSelectionRect(state: TimelineRenderState): void {
+    if (!state.selectionRect) return
+    const { x, y, width, height } = state.selectionRect
+    const { context } = this
+    context.save()
+    context.fillStyle = 'rgb(114 228 189 / 12%)'
+    context.strokeStyle = '#72e4bd'
+    context.setLineDash([5, 3])
+    context.fillRect(x, y, width, height)
+    context.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), Math.max(0, height - 1))
+    context.restore()
   }
 
   private drawSnapGuide(state: TimelineRenderState): void {

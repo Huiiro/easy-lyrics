@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from '@renderer/i18n'
 
 import { useProjectStore } from '@renderer/stores/project'
+import { useTimelineStore } from '@renderer/stores/timeline'
 import { formatTime, parseTimecode } from '@renderer/utils/time'
 
 const projectStore = useProjectStore()
+const timelineStore = useTimelineStore()
 const { t } = useI18n()
 const error = ref<string | null>(null)
-const structureError = ref<string | null>(null)
-const splitText = ref('')
-const splitInput = ref<HTMLInputElement | null>(null)
 
 const duration = computed(() => {
   const token = projectStore.activeToken
@@ -22,16 +21,6 @@ const canMergeNext = computed(() => {
   const line = projectStore.activeLine
   return Boolean(line && projectStore.currentTokenIndex < line.tokens.length - 1)
 })
-
-watch(
-  () => projectStore.activeToken?.id,
-  () => {
-    const text = projectStore.activeToken?.text ?? ''
-    splitText.value = Array.from(text).join('|')
-    structureError.value = null
-  },
-  { immediate: true }
-)
 
 function displayTime(time: number | null | undefined): string {
   return time === null || time === undefined ? '' : formatTime(time)
@@ -61,28 +50,25 @@ function updateOffset(event: Event): void {
   projectStore.setTimingOffset(Number((event.target as HTMLInputElement).value))
 }
 
-function splitToken(): void {
-  const parts = splitText.value.split('|')
-  if (!projectStore.splitActiveToken(parts)) {
-    structureError.value = t('请用 | 标出拆分位置，且拆分后的文字需与原 Token 一致')
-    return
-  }
-  structureError.value = null
-}
-
 function mergeToken(direction: -1 | 1): void {
   projectStore.mergeActiveToken(direction)
-  structureError.value = null
 }
 
-function focusSplitInput(): void {
+function openStructureDialog(): void {
   if (!projectStore.activeToken) return
-  splitInput.value?.focus()
-  splitInput.value?.select()
+  window.dispatchEvent(new CustomEvent('token-structure-dialog', { detail: 'split' }))
 }
 
-onMounted(() => window.addEventListener('token-split-focus', focusSplitInput))
-onUnmounted(() => window.removeEventListener('token-split-focus', focusSplitInput))
+function deleteActiveToken(): void {
+  const token = projectStore.activeToken
+  if (!token) return
+  if (projectStore.deleteTokens([token.id])) {
+    timelineStore.selectedTokenIds = projectStore.activeToken ? [projectStore.activeToken.id] : []
+  }
+}
+
+onMounted(() => window.addEventListener('token-split-focus', openStructureDialog))
+onUnmounted(() => window.removeEventListener('token-split-focus', openStructureDialog))
 </script>
 
 <template>
@@ -94,18 +80,12 @@ onUnmounted(() => window.removeEventListener('token-split-focus', focusSplitInpu
 
       <section class="token-structure-editor">
         <p>{{ t('拆分 / 合并 Token') }}</p>
-        <label class="inspector-field">
-          <span>{{ t('用 | 标记拆分位置，例如 be|cause') }}</span>
-          <input
-            ref="splitInput"
-            v-model="splitText"
-            type="text"
-            placeholder="be|cause"
-            @keyup.enter="splitToken"
-          />
-        </label>
         <div class="token-structure-actions">
-          <button type="button" :disabled="!splitText.includes('|')" @click="splitToken">
+          <button
+            type="button"
+            :disabled="Array.from(projectStore.activeToken.text).length < 2"
+            @click="openStructureDialog"
+          >
             {{ t('拆分') }}
           </button>
           <button type="button" :disabled="!canMergePrevious" @click="mergeToken(-1)">
@@ -114,8 +94,10 @@ onUnmounted(() => window.removeEventListener('token-split-focus', focusSplitInpu
           <button type="button" :disabled="!canMergeNext" @click="mergeToken(1)">
             {{ t('合并后项') }}
           </button>
+          <button type="button" class="danger" @click="deleteActiveToken">
+            {{ t('删除') }}
+          </button>
         </div>
-        <p v-if="structureError" class="inspector-error" role="alert">{{ structureError }}</p>
       </section>
 
       <label class="inspector-field">

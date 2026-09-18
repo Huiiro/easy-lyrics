@@ -15,7 +15,7 @@ const playerStore = usePlayerStore()
 const timelineStore = useTimelineStore()
 const player = getAudioPlayer()
 const { t } = useI18n()
-const lineItems = ref<HTMLElement[]>([])
+const lineItems = new Map<string, HTMLElement>()
 const manuallyFocusedLineIndex = ref<number | null>(null)
 const playbackLineIndex = computed(() =>
   getPlaybackLineIndex(projectStore.project.lines, playerStore.currentTime)
@@ -26,6 +26,11 @@ const expandedLineIndex = computed(() =>
     : timelineStore.followLyrics && playerStore.playing && playbackLineIndex.value >= 0
     ? playbackLineIndex.value
     : projectStore.currentLineIndex
+)
+const lineLayoutKey = computed(() =>
+  projectStore.project.lines
+    .map((line) => `${line.id}:${line.tokens.map((token) => token.id).join(',')}`)
+    .join('|')
 )
 const emit = defineEmits<{ requestImport: [] }>()
 
@@ -66,12 +71,26 @@ function pasteTiming(): void {
   projectStore.pasteLineTimingAt(playerStore.currentTime)
 }
 
-watch(playbackLineIndex, async (lineIndex) => {
-  manuallyFocusedLineIndex.value = null
-  if (!timelineStore.followLyrics || !playerStore.playing || lineIndex < 0) return
+function setLineItem(lineId: string, element: unknown): void {
+  if (element instanceof HTMLElement) lineItems.set(lineId, element)
+  else lineItems.delete(lineId)
+}
+
+async function scrollToLine(lineIndex: number, block: 'center' | 'nearest'): Promise<void> {
+  const lineId = projectStore.project.lines[lineIndex]?.id
+  if (!lineId) return
   await nextTick()
-  lineItems.value[lineIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-})
+  lineItems.get(lineId)?.scrollIntoView({ behavior: 'smooth', block })
+}
+
+watch(
+  [playbackLineIndex, lineLayoutKey, () => timelineStore.followLyrics, () => playerStore.playing],
+  async ([lineIndex]) => {
+    manuallyFocusedLineIndex.value = null
+    if (!timelineStore.followLyrics || !playerStore.playing || Number(lineIndex) < 0) return
+    await scrollToLine(Number(lineIndex), 'nearest')
+  }
+)
 
 watch(
   () => timelineStore.lyricsFocusNonce,
@@ -79,8 +98,7 @@ watch(
     const lineIndex = timelineStore.lyricsFocusLineIndex
     if (lineIndex === null) return
     manuallyFocusedLineIndex.value = lineIndex
-    await nextTick()
-    lineItems.value[lineIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    await scrollToLine(lineIndex, 'center')
   }
 )
 </script>
@@ -150,7 +168,7 @@ watch(
       <li
         v-for="(line, lineIndex) in projectStore.project.lines"
         :key="line.id"
-        ref="lineItems"
+        :ref="(element) => setLineItem(line.id, element)"
         :class="{
           active: lineIndex === projectStore.currentLineIndex,
           playing: timelineStore.followLyrics && lineIndex === playbackLineIndex
@@ -181,7 +199,9 @@ watch(
             type="button"
             :class="{
               active:
-                projectStore.activeToken !== null && tokenIndex === projectStore.currentTokenIndex,
+                projectStore.activeToken !== null &&
+                lineIndex === projectStore.currentLineIndex &&
+                tokenIndex === projectStore.currentTokenIndex,
               timed: token.start !== null
             }"
             :title="
