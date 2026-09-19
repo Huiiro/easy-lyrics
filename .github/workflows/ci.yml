@@ -111,12 +111,25 @@ jobs:
             kill "$app_pid"
             wait "$app_pid" || true
           done
-      - name: Smoke test Windows application
+      - name: Install and smoke test Windows application
         if: matrix.target == 'win'
         shell: pwsh
         run: |
+          $installer = Get-ChildItem "dist/*-windows-x64.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer was not generated"
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP "Lyric Timeline Installed"
+          $installerProcess = Start-Process $installer.FullName -ArgumentList "/S", "/D=$installDir" -PassThru -Wait
+          if ($installerProcess.ExitCode -ne 0) {
+            throw "Installer exited with code $($installerProcess.ExitCode)"
+          }
+          $installedExecutable = Join-Path $installDir "lyric-timeline.exe"
+          if (-not (Test-Path $installedExecutable)) {
+            throw "Installed application executable was not found"
+          }
           $userDataDir = Join-Path $env:RUNNER_TEMP "lyric-timeline-smoke"
-          $process = Start-Process "dist/win-unpacked/lyric-timeline.exe" -ArgumentList "--disable-gpu", "--user-data-dir=$userDataDir" -PassThru
+          $process = Start-Process $installedExecutable -ArgumentList "--user-data-dir=$userDataDir" -PassThru
           Start-Sleep -Seconds 10
           if ($process.HasExited) {
             throw "Packaged application exited unexpectedly with code $($process.ExitCode)"

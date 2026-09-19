@@ -250,6 +250,11 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
+// Some Windows graphics drivers terminate Electron before the first window is
+// shown. This editor does not rely on GPU rendering, so prefer a reliable
+// software-rendered startup on Windows.
+if (process.platform === 'win32') app.disableHardwareAcceleration()
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
   ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
