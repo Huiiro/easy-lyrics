@@ -36,6 +36,8 @@ nsis:
 mac:
   category: public.app-category.music
   icon: build/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
   target:
     - dmg
     - zip
@@ -57,3 +59,5 @@ publish:
   owner: Huiiro
   repo: easy-lyrics
   releaseType: release
+
+afterPack: scripts/after-pack.mjs

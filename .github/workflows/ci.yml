@@ -38,13 +38,20 @@ jobs:
         include:
           - os: windows-latest
             target: win
+            args: --x64
           - os: macos-latest
             target: mac
+            args: --x64 --arm64
           - os: ubuntu-latest
             target: linux
+            args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,7 +60,36 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:app
-      - run: npx electron-builder --${{ matrix.target }} --publish never
+      - run: npx electron-builder --${{ matrix.target }} ${{ matrix.args }} --publish never
+      - name: Verify macOS application signatures
+        if: matrix.target == 'mac'
+        run: |
+          find dist -type d -name '*.app' -prune -print0 | while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+      - name: Smoke test macOS applications
+        if: matrix.target == 'mac'
+        run: |
+          find dist -type d -name '*.app' -prune -print0 | while IFS= read -r -d '' app; do
+            user_data_dir="$(mktemp -d "$RUNNER_TEMP/lyric-timeline-smoke.XXXXXX")"
+            "$app/Contents/MacOS/Lyric Timeline" --disable-gpu --user-data-dir="$user_data_dir" &
+            app_pid=$!
+            sleep 10
+            kill -0 "$app_pid"
+            kill "$app_pid"
+            wait "$app_pid" || true
+          done
+      - name: Smoke test Windows application
+        if: matrix.target == 'win'
+        shell: pwsh
+        run: |
+          $userDataDir = Join-Path $env:RUNNER_TEMP "lyric-timeline-smoke"
+          $process = Start-Process "dist/win-unpacked/lyric-timeline.exe" -ArgumentList "--disable-gpu", "--user-data-dir=$userDataDir" -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "Packaged application exited unexpectedly with code $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force
       - uses: actions/upload-artifact@v4
         with:
           name: lyric-timeline-${{ matrix.target }}
