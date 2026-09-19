@@ -121,9 +121,18 @@ jobs:
             if (-not $installer) {
               throw "Windows installer was not generated"
             }
-            $installerProcess = Start-Process $installer.FullName -ArgumentList "/S" -PassThru -Wait
-            if ($installerProcess.ExitCode -ne 0) {
-              throw "Installer exited with code $($installerProcess.ExitCode)"
+            $installerExitCode = $null
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              $installerProcess = Start-Process $installer.FullName -ArgumentList "/S" -PassThru -Wait
+              $installerExitCode = $installerProcess.ExitCode
+              if ($installerExitCode -eq 0) {
+                break
+              }
+              Write-Warning "Installer attempt $attempt exited with code $installerExitCode"
+              Start-Sleep -Seconds 3
+            }
+            if ($installerExitCode -ne 0) {
+              throw "Installer failed after 3 attempts with code $installerExitCode"
             }
             $programsDir = Join-Path $env:LOCALAPPDATA "Programs"
             $installedExecutable = Get-ChildItem $programsDir -Filter "lyric-timeline.exe" -Recurse -File | Select-Object -First 1
