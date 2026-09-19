@@ -17,14 +17,14 @@ const desktopApi: DesktopApi = {
   saveProject: (project, path, windowSessionId) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveProject, project, path, windowSessionId),
   openProject: () => ipcRenderer.invoke(IPC_CHANNELS.openProject),
-  autosaveProject: (project, windowSessionId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.autosaveProject, project, windowSessionId),
+  autosaveProject: (project, windowSessionId, projectPath) =>
+    ipcRenderer.invoke(IPC_CHANNELS.autosaveProject, project, windowSessionId, projectPath),
   loadAutosave: () => ipcRenderer.invoke(IPC_CHANNELS.loadAutosave),
   clearAutosave: (projectId, windowSessionId) =>
     ipcRenderer.invoke(IPC_CHANNELS.clearAutosave, projectId, windowSessionId),
-  listSaveHistory: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.listSaveHistory, projectId),
-  loadSaveHistoryEntry: (projectId, entryId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.loadSaveHistoryEntry, projectId, entryId),
+  listSaveHistory: (projectId, projectPath) =>
+    ipcRenderer.invoke(IPC_CHANNELS.listSaveHistory, projectId, projectPath),
+  loadSaveHistoryEntry: (entryId) => ipcRenderer.invoke(IPC_CHANNELS.loadSaveHistoryEntry, entryId),
   listRecentProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listRecentProjects),
   openRecentProject: (path) => ipcRenderer.invoke(IPC_CHANNELS.openRecentProject, path),
   loadLastProject: () => ipcRenderer.invoke(IPC_CHANNELS.loadLastProject),

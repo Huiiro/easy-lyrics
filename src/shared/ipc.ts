@@ -65,11 +65,15 @@ export interface DesktopApi {
     windowSessionId: string
   ) => Promise<ProjectFileResult | null>
   openProject: () => Promise<ProjectFileResult | null>
-  autosaveProject: (project: LyricProject, windowSessionId: string) => Promise<void>
+  autosaveProject: (
+    project: LyricProject,
+    windowSessionId: string,
+    projectPath?: string
+  ) => Promise<void>
   loadAutosave: () => Promise<ProjectFileResult | null>
   clearAutosave: (projectId: string, windowSessionId: string) => Promise<void>
-  listSaveHistory: (projectId: string) => Promise<SaveHistoryEntry[]>
-  loadSaveHistoryEntry: (projectId: string, entryId: string) => Promise<ProjectFileResult | null>
+  listSaveHistory: (projectId: string, projectPath?: string) => Promise<SaveHistoryEntry[]>
+  loadSaveHistoryEntry: (entryId: string) => Promise<ProjectFileResult | null>
   listRecentProjects: () => Promise<RecentProject[]>
   openRecentProject: (path: string) => Promise<ProjectFileResult | null>
   loadLastProject: () => Promise<ProjectFileResult | null>
@@ -108,6 +112,7 @@ export interface SaveHistoryEntry {
   path: string
   savedAt: number
   archiveAvailable: boolean
+  kind: 'manual' | 'autosave'
 }
 
 export interface ProjectFileResult {

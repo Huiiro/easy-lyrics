@@ -100,6 +100,9 @@ const messages: Record<string, string> = {
     'Automatically advance when the playhead reaches the right edge',
   autosave_failed: 'Autosave failed',
   autosave_restored: 'Autosave restored',
+  autosave_disabled_status: 'Autosave off',
+  autosave_enabled_interval: 'Autosave on ({minutes} min)',
+  autosave_last_saved_at: 'Last autosave {time}',
   built_in_rules: 'Built-in Rules',
   center_the_selected_token_and_move_the_playhead:
     'Center the selected token and move the playhead',
@@ -210,6 +213,7 @@ const messages: Record<string, string> = {
     'Manage template contents in Settings → Export Templates.',
   mark_at_least_one_split_point: 'Mark at least one split point',
   mark_current_token: 'Mark Current Token',
+  manual_save: 'Manual save',
   merge_next: 'Merge Next',
   merge_next_token: 'Merge Next Token',
   merge_previous: 'Merge Previous',

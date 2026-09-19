@@ -10,7 +10,8 @@ describe('save history', () => {
       projectName: 'Song',
       path: '/song.lyricproj',
       savedAt: 100,
-      archiveAvailable: true
+      archiveAvailable: true,
+      kind: 'manual' as const
     }
     expect(parseSaveHistory([valid, { projectId: 12 }])).toEqual([valid])
 
@@ -28,7 +29,8 @@ describe('save history', () => {
       projectName: 'Song',
       path: '/song.lyricproj',
       savedAt: index,
-      archiveAvailable: true
+      archiveAvailable: true,
+      kind: 'manual' as const
     }))
     expect(
       addSaveHistoryEntry(entries, { ...entries[0]!, id: 'new', savedAt: 10 }, 2)
@@ -47,5 +49,16 @@ describe('save history', () => {
         }
       ])[0]?.archiveAvailable
     ).toBe(false)
+    expect(
+      parseSaveHistory([
+        {
+          id: 'old',
+          projectId: 'project',
+          projectName: 'Song',
+          path: '/song.lyricproj',
+          savedAt: 1
+        }
+      ])[0]?.kind
+    ).toBe('manual')
   })
 })

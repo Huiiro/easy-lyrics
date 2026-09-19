@@ -109,7 +109,11 @@ async function readSaveHistory(): Promise<SaveHistoryEntry[]> {
   }
 }
 
-async function recordSave(project: LyricProject, path: string): Promise<void> {
+async function recordSave(
+  project: LyricProject,
+  path: string,
+  kind: SaveHistoryEntry['kind'] = 'manual'
+): Promise<void> {
   const operation = saveHistoryQueue
     .catch(() => undefined)
     .then(async () => {
@@ -119,7 +123,8 @@ async function recordSave(project: LyricProject, path: string): Promise<void> {
         projectName: project.name,
         path,
         savedAt: Date.now(),
-        archiveAvailable: true
+        archiveAvailable: true,
+        kind
       }
       await mkdir(saveArchivesPath(project.id), { recursive: true })
       await atomicWrite(saveArchivePath(project.id, entry.id), project)
@@ -339,7 +344,7 @@ function registerIpcHandlers(): void {
       if (!path.endsWith('.lyricproj')) path += '.lyricproj'
       await atomicWrite(path, project)
       await clearWindowAutosave(project.id, windowSessionId, event.sender.id)
-      await recordSave(project, path)
+      await recordSave(project, path, 'manual')
       await rememberProject(path, project.name)
       return { path, project, audio: null, audioMissing: false }
     }
@@ -362,9 +367,10 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle(
     IPC_CHANNELS.autosaveProject,
-    async (_event, project: LyricProject, windowSessionId: string) => {
+    async (_event, project: LyricProject, windowSessionId: string, projectPath?: string) => {
       await mkdir(autosavesPath(), { recursive: true })
       await atomicWrite(autosavePath(project.id, windowSessionId), project)
+      await recordSave(project, projectPath ?? '', 'autosave')
     }
   )
   ipcMain.handle(IPC_CHANNELS.loadAutosave, async (event) => {
@@ -399,24 +405,26 @@ function registerIpcHandlers(): void {
     async (event, projectId: string, windowSessionId: string) =>
       clearWindowAutosave(projectId, windowSessionId, event.sender.id)
   )
-  ipcMain.handle(IPC_CHANNELS.listSaveHistory, async (_event, projectId: string) =>
-    (await readSaveHistory()).filter((entry) => entry.projectId === projectId)
-  )
   ipcMain.handle(
-    IPC_CHANNELS.loadSaveHistoryEntry,
-    async (_event, projectId: string, entryId: string) => {
-      const entry = (await readSaveHistory()).find(
-        (item) => item.id === entryId && item.projectId === projectId && item.archiveAvailable
+    IPC_CHANNELS.listSaveHistory,
+    async (_event, projectId: string, projectPath?: string) =>
+      (await readSaveHistory()).filter(
+        (entry) =>
+          entry.projectId === projectId || Boolean(projectPath && entry.path === projectPath)
       )
-      if (!entry) return null
-      try {
-        return await readProject(saveArchivePath(projectId, entryId), null)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-        throw error
-      }
-    }
   )
+  ipcMain.handle(IPC_CHANNELS.loadSaveHistoryEntry, async (_event, entryId: string) => {
+    const entry = (await readSaveHistory()).find(
+      (item) => item.id === entryId && item.archiveAvailable
+    )
+    if (!entry) return null
+    try {
+      return await readProject(saveArchivePath(entry.projectId, entryId), null)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  })
   ipcMain.handle(IPC_CHANNELS.listRecentProjects, () => listRecentProjects())
   ipcMain.handle(IPC_CHANNELS.openRecentProject, (_event, path: string) => openRecentProject(path))
   ipcMain.handle(IPC_CHANNELS.loadLastProject, async () => {

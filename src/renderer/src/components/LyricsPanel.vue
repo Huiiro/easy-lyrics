@@ -106,17 +106,7 @@ watch(
 <template>
   <aside class="panel lyrics-panel">
     <header class="panel-header">
-      <p class="panel-label">{{ t('lyrics') }}</p>
       <div class="panel-actions">
-        <button
-          v-if="projectStore.project.lines.length"
-          class="text-button"
-          type="button"
-          :title="t('clean_lyrics_with_rules_or_regular_expressions')"
-          @click="emit('requestPreprocess')"
-        >
-          {{ t('preprocess') }}
-        </button>
         <button
           v-if="projectStore.project.lines.length"
           class="text-button"
@@ -156,6 +146,15 @@ watch(
           @click="smartTime"
         >
           {{ t('auto_timing') }}
+        </button>
+        <button
+          v-if="projectStore.project.lines.length"
+          class="text-button"
+          type="button"
+          :title="t('clean_lyrics_with_rules_or_regular_expressions')"
+          @click="emit('requestPreprocess')"
+        >
+          {{ t('preprocess') }}
         </button>
         <button class="text-button" type="button" @click="emit('requestImport')">
           {{ projectStore.project.lines.length ? t('edit') : t('import') }}

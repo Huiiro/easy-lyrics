@@ -22,7 +22,8 @@ export function parseSaveHistory(value: unknown): SaveHistoryEntry[] {
         projectName: item.projectName,
         path: item.path,
         savedAt: item.savedAt,
-        archiveAvailable: item.archiveAvailable === true
+        archiveAvailable: item.archiveAvailable === true,
+        kind: item.kind === 'autosave' ? 'autosave' : 'manual'
       }
     ]
   })

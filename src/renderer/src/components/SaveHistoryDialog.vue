@@ -5,7 +5,12 @@ import BaseDialog from '@renderer/components/ui/BaseDialog.vue'
 import { useI18n } from '@renderer/i18n'
 import type { ProjectFileResult, SaveHistoryEntry } from '@shared/ipc'
 
-const props = defineProps<{ open: boolean; projectId: string; projectName: string }>()
+const props = defineProps<{
+  open: boolean
+  projectId: string
+  projectName: string
+  projectPath: string | null
+}>()
 const emit = defineEmits<{ close: []; restored: [result: ProjectFileResult] }>()
 const { t } = useI18n()
 const entries = ref<SaveHistoryEntry[]>([])
@@ -14,13 +19,13 @@ const restoringId = ref<string | null>(null)
 const confirmingEntry = ref<SaveHistoryEntry | null>(null)
 
 watch(
-  () => [props.open, props.projectId] as const,
-  async ([open, projectId]) => {
+  () => [props.open, props.projectId, props.projectPath] as const,
+  async ([open, projectId, projectPath]) => {
     if (!open) return
     confirmingEntry.value = null
     loading.value = true
     try {
-      entries.value = await window.desktopApi.listSaveHistory(projectId)
+      entries.value = await window.desktopApi.listSaveHistory(projectId, projectPath ?? undefined)
     } finally {
       loading.value = false
     }
@@ -44,7 +49,7 @@ async function confirmRestore(): Promise<void> {
   if (!entry || restoringId.value) return
   restoringId.value = entry.id
   try {
-    const result = await window.desktopApi.loadSaveHistoryEntry(props.projectId, entry.id)
+    const result = await window.desktopApi.loadSaveHistoryEntry(entry.id)
     if (!result) {
       window.alert(t('archive_unavailable'))
       return
@@ -94,10 +99,13 @@ async function confirmRestore(): Promise<void> {
       <ol v-else class="save-history-list">
         <li v-for="entry in entries" :key="entry.id">
           <div class="save-history-record">
-            <time :datetime="new Date(entry.savedAt).toISOString()">{{
-              formatTime(entry.savedAt)
-            }}</time>
-            <span :title="entry.path">{{ entry.path }}</span>
+            <div>
+              <time :datetime="new Date(entry.savedAt).toISOString()">{{
+                formatTime(entry.savedAt)
+              }}</time>
+              <small>{{ entry.kind === 'autosave' ? t('autosave') : t('manual_save') }}</small>
+            </div>
+            <span :title="entry.path">{{ entry.path || t('unsaved_project') }}</span>
           </div>
           <button
             class="secondary-button"

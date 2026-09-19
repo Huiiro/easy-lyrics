@@ -2015,6 +2015,19 @@ input[type='range'] {
 .save-history-record {
   min-width: 0;
 }
+.save-history-record > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.save-history-record small {
+  padding: 2px 6px;
+  border: 1px solid #3a4650;
+  border-radius: 999px;
+  color: #8fa09d;
+  font-size: 9px;
+  font-weight: 700;
+}
 .save-history-list .secondary-button {
   flex: 0 0 auto;
 }
@@ -2083,6 +2096,7 @@ input[type='range'] {
   color: #7f8b98;
   background: #0d1014;
   font-size: 12px;
+  white-space: nowrap;
 }
 .status-dot {
   width: 7px;
@@ -2090,6 +2104,10 @@ input[type='range'] {
   border-radius: 50%;
   background: #55cf9f;
   box-shadow: 0 0 8px #55cf9f;
+}
+.status-dot.off {
+  background: #66717b;
+  box-shadow: none;
 }
 
 /* Settings follows the compact, two-pane structure used by desktop IDEs. */

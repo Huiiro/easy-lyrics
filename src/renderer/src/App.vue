@@ -50,6 +50,8 @@ const timelineStore = useTimelineStore()
 const player = getAudioPlayer()
 const projectPath = ref<string | null>(null)
 const fileStatus = ref('')
+const lastAutosavedAt = ref<number | null>(null)
+let lastAutosaveFingerprint = ''
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
 let removeAppCloseListener: (() => void) | null = null
 let removeIntegrationListener: (() => void) | null = null
@@ -74,6 +76,21 @@ const workspaceStyle = computed(() => ({
   '--right-top-height': `${rightTopHeight.value}%`
 }))
 const editableLyrics = computed(() => lyricLinesToSource(projectStore.project.lines))
+const autosaveStatus = computed(() => {
+  if (!settingsStore.autosaveEnabled) return t('autosave_disabled_status')
+  if (lastAutosavedAt.value) {
+    return t('autosave_last_saved_at', {
+      time: new Date(lastAutosavedAt.value).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    })
+  }
+  return t('autosave_enabled_interval', {
+    minutes: Math.max(1, Math.round(settingsStore.autosaveIntervalMs / 60_000))
+  })
+})
 
 function beginResize(target: ResizeTarget, event: PointerEvent): void {
   resizing = target
@@ -142,6 +159,8 @@ function resetProject(): void {
   playerStore.duration = 0
   projectStore.loadProject(createEmptyProject())
   projectPath.value = null
+  lastAutosavedAt.value = null
+  lastAutosaveFingerprint = JSON.stringify(projectStore.snapshot())
   fileStatus.value = t('new_project')
 }
 
@@ -242,6 +261,7 @@ async function restoreSaveHistory(result: ProjectFileResult): Promise<void> {
   const currentPath = projectPath.value
   await applyLoadedProject({ ...result, path: currentPath })
   projectStore.dirty = true
+  lastAutosaveFingerprint = ''
   fileStatus.value = t('archive_restored_save_to_keep_changes')
 }
 
@@ -320,6 +340,8 @@ async function applyLoadedProject(result: ProjectFileResult): Promise<void> {
   projectStore.loadProject(result.project)
   if (!result.path) projectStore.dirty = true
   projectPath.value = result.path
+  lastAutosavedAt.value = null
+  lastAutosaveFingerprint = JSON.stringify(projectStore.snapshot())
   loadAudio(result.audio)
   fileStatus.value = result.path ? t('project_opened') : t('autosave_restored')
   if (result.audioMissing && window.confirm(t('the_project_audio_is_missing_locate_it_now'))) {
@@ -352,6 +374,7 @@ async function saveProject(): Promise<boolean> {
     projectPath.value = result.path
     if (JSON.stringify(projectStore.snapshot()) === JSON.stringify(snapshot))
       projectStore.markSaved()
+    lastAutosaveFingerprint = JSON.stringify(snapshot)
     fileStatus.value = t('saved')
     await refreshRecentProjects()
     return true
@@ -432,8 +455,17 @@ onMounted(async () => {
     if (!settingsStore.autosaveEnabled) return
     autosaveTimer = setInterval(async () => {
       if (!projectStore.dirty) return
+      const snapshot = projectStore.snapshot()
+      const fingerprint = JSON.stringify(snapshot)
+      if (fingerprint === lastAutosaveFingerprint) return
       try {
-        await window.desktopApi.autosaveProject(projectStore.snapshot(), windowSessionId)
+        await window.desktopApi.autosaveProject(
+          snapshot,
+          windowSessionId,
+          projectPath.value ?? undefined
+        )
+        lastAutosaveFingerprint = fingerprint
+        lastAutosavedAt.value = Date.now()
         fileStatus.value = t('autosaved')
       } catch {
         fileStatus.value = t('autosave_failed')
@@ -543,8 +575,9 @@ onMounted(async () => {
     </section>
 
     <footer class="statusbar">
-      <span class="status-dot" />
+      <span class="status-dot" :class="{ off: !settingsStore.autosaveEnabled }" />
       {{ ipcStatus }}
+      <span>· {{ autosaveStatus }}</span>
       <span v-if="fileStatus"> · {{ fileStatus }}</span>
     </footer>
 
@@ -566,6 +599,7 @@ onMounted(async () => {
       :open="saveHistoryOpen"
       :project-id="projectStore.project.id"
       :project-name="projectStore.project.name"
+      :project-path="projectPath"
       @close="saveHistoryOpen = false"
       @restored="restoreSaveHistory"
     />
