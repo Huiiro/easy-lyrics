@@ -39,12 +39,19 @@ jobs:
           - os: windows-latest
             target: win
             args: --x64
+            artifact: win
+          - os: macos-15-intel
+            target: mac
+            args: --x64
+            artifact: mac-x64
           - os: macos-latest
             target: mac
-            args: --x64 --arm64
+            args: --arm64
+            artifact: mac-arm64
           - os: ubuntu-latest
             target: linux
             args: --x64
+            artifact: linux
     runs-on: ${{ matrix.os }}
     env:
       CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
@@ -92,7 +99,7 @@ jobs:
           Stop-Process -Id $process.Id -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: lyric-timeline-${{ matrix.target }}
+          name: lyric-timeline-${{ matrix.artifact }}
           if-no-files-found: error
           path: |
             dist/*.exe
