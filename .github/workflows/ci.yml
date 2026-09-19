@@ -121,19 +121,18 @@ jobs:
             if (-not $installer) {
               throw "Windows installer was not generated"
             }
-            $installDir = Join-Path $env:RUNNER_TEMP "Lyric Timeline Installed"
-            $installerArguments = "/S /D=$installDir"
-            $installerProcess = Start-Process $installer.FullName -ArgumentList $installerArguments -PassThru -Wait
+            $installerProcess = Start-Process $installer.FullName -ArgumentList "/S" -PassThru -Wait
             if ($installerProcess.ExitCode -ne 0) {
               throw "Installer exited with code $($installerProcess.ExitCode)"
             }
-            $installedExecutable = Join-Path $installDir "lyric-timeline.exe"
-            if (-not (Test-Path $installedExecutable)) {
-              $installedFiles = (Get-ChildItem $installDir -Recurse -File | Select-Object -ExpandProperty FullName) -join ", "
-              throw "Installed application executable was not found. Files: $installedFiles"
+            $programsDir = Join-Path $env:LOCALAPPDATA "Programs"
+            $installedExecutable = Get-ChildItem $programsDir -Filter "lyric-timeline.exe" -Recurse -File | Select-Object -First 1
+            if (-not $installedExecutable) {
+              $installedFiles = (Get-ChildItem $programsDir -Recurse -File | Select-Object -ExpandProperty FullName) -join ", "
+              throw "Installed application executable was not found under $programsDir. Files: $installedFiles"
             }
             $userDataDir = Join-Path $env:RUNNER_TEMP "lyric-timeline-smoke"
-            $process = Start-Process $installedExecutable -ArgumentList "--user-data-dir=$userDataDir" -PassThru
+            $process = Start-Process $installedExecutable.FullName -ArgumentList "--user-data-dir=$userDataDir" -PassThru
             Start-Sleep -Seconds 10
             if ($process.HasExited) {
               throw "Installed application exited unexpectedly with code $($process.ExitCode)"
