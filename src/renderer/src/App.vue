@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import LyricsImportDialog from '@renderer/components/LyricsImportDialog.vue'
+import LyricsPreprocessDialog from '@renderer/components/LyricsPreprocessDialog.vue'
 import AppHeader from '@renderer/components/AppHeader.vue'
 import LyricsPanel from '@renderer/components/LyricsPanel.vue'
 import LyricsPreview from '@renderer/components/LyricsPreview.vue'
@@ -10,6 +11,8 @@ import SettingsDialog from '@renderer/components/SettingsDialog.vue'
 import TokenInspector from '@renderer/components/TokenInspector.vue'
 import TokenStructureDialog from '@renderer/components/TokenStructureDialog.vue'
 import UnsavedChangesDialog from '@renderer/components/UnsavedChangesDialog.vue'
+import SaveHistoryDialog from '@renderer/components/SaveHistoryDialog.vue'
+import WindowOpenDialog from '@renderer/components/WindowOpenDialog.vue'
 import Timeline from '@renderer/components/timeline/Timeline.vue'
 import { useI18n } from '@renderer/i18n'
 import { useGlobalShortcuts } from '@renderer/composables/use-global-shortcuts'
@@ -17,16 +20,23 @@ import { getAudioPlayer } from '@renderer/services/audio-player'
 import { createLyricLines, lyricLinesToSource } from '@renderer/services/tokenizer'
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
+import { useSettingsStore } from '@renderer/stores/settings'
+import { useTimelineStore } from '@renderer/stores/timeline'
 import type { IntegrationOpenResult, ProjectFileResult, RecentProject } from '@shared/ipc'
 import { createEmptyProject, type TokenizerMode } from '@shared/models/project'
 
 const { locale, setLocale, t } = useI18n()
 setLocale(locale.value)
-const ipcStatus = ref(t('正在检查…'))
+const ipcStatus = ref(t('checking'))
 const importOpen = ref(false)
+const preprocessOpen = ref(false)
+const importDraft = ref<string | null>(null)
+const appVersion = ref('')
 const settingsOpen = ref(false)
 const exportOpen = ref(false)
 const unsavedChangesOpen = ref(false)
+const saveHistoryOpen = ref(false)
+const windowOpenDialogOpen = ref(false)
 const savingBeforeContinue = ref(false)
 const recentProjects = ref<RecentProject[]>([])
 const workspace = ref<HTMLElement | null>(null)
@@ -34,14 +44,19 @@ const leftWidth = ref(28)
 const leftTopHeight = ref(62)
 const rightTopHeight = ref(58)
 const projectStore = useProjectStore()
+const settingsStore = useSettingsStore()
 const playerStore = usePlayerStore()
+const timelineStore = useTimelineStore()
 const player = getAudioPlayer()
 const projectPath = ref<string | null>(null)
 const fileStatus = ref('')
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
 let removeAppCloseListener: (() => void) | null = null
 let removeIntegrationListener: (() => void) | null = null
+let removeRecentProjectsListener: (() => void) | null = null
 let pendingAction: (() => void | Promise<void>) | null = null
+const pendingWindowOperation = ref<{ type: 'new' | 'open' | 'recent'; path?: string } | null>(null)
+const windowSessionId = crypto.randomUUID()
 watch(
   () => projectStore.dirty,
   (dirty) => window.desktopApi?.setProjectDirty(dirty),
@@ -112,7 +127,7 @@ function applyPlayerSong(request: IntegrationOpenResult): void {
   projectStore.dirty = true
   projectPath.value = null
   loadAudio(audio)
-  fileStatus.value = t('已从播放器打开')
+  fileStatus.value = t('opened_from_player')
 }
 
 function openPlayerSong(request: IntegrationOpenResult): void {
@@ -127,7 +142,7 @@ function resetProject(): void {
   playerStore.duration = 0
   projectStore.loadProject(createEmptyProject())
   projectPath.value = null
-  fileStatus.value = t('新工程')
+  fileStatus.value = t('new_project')
 }
 
 function continueAfterUnsavedCheck(action: () => void | Promise<void>): void {
@@ -145,10 +160,11 @@ function cancelPendingAction(): void {
   unsavedChangesOpen.value = false
 }
 
-async function runPendingAction(): Promise<void> {
+async function runPendingAction(clearAutosave = false): Promise<void> {
   const action = pendingAction
   pendingAction = null
   unsavedChangesOpen.value = false
+  if (clearAutosave) await window.desktopApi.clearAutosave(projectStore.project.id, windowSessionId)
   if (action) await action()
 }
 
@@ -159,13 +175,54 @@ async function saveAndRunPendingAction(): Promise<void> {
   if (saved) await runPendingAction()
 }
 
+function requestWindowChoice(operation: { type: 'new' | 'open' | 'recent'; path?: string }): void {
+  pendingWindowOperation.value = operation
+  windowOpenDialogOpen.value = true
+}
+
+function cancelWindowChoice(): void {
+  pendingWindowOperation.value = null
+  windowOpenDialogOpen.value = false
+}
+
+function useCurrentWindow(): void {
+  const operation = pendingWindowOperation.value
+  cancelWindowChoice()
+  if (!operation) return
+  if (operation.type === 'new') continueAfterUnsavedCheck(resetProject)
+  else if (operation.type === 'open') continueAfterUnsavedCheck(openProjectFile)
+  else {
+    const path = operation.path
+    if (path) continueAfterUnsavedCheck(() => openRecentProjectFile(path))
+  }
+}
+
+async function useNewWindow(): Promise<void> {
+  const operation = pendingWindowOperation.value
+  cancelWindowChoice()
+  if (!operation) return
+  try {
+    if (operation.type === 'new') await window.desktopApi.createProjectWindow()
+    else if (operation.type === 'open') await window.desktopApi.openProjectInNewWindow()
+    else if (operation.path) {
+      const opened = await window.desktopApi.openRecentProjectInNewWindow(operation.path)
+      if (!opened) {
+        fileStatus.value = t('project_file_is_missing_or_unreadable')
+        await refreshRecentProjects()
+      }
+    }
+  } catch (error) {
+    fileStatus.value = error instanceof Error ? error.message : t('open_failed')
+  }
+}
+
 function newProject(): void {
-  continueAfterUnsavedCheck(resetProject)
+  requestWindowChoice({ type: 'new' })
 }
 
 function finishClosingProject(): void {
   resetProject()
-  fileStatus.value = t('工程已关闭')
+  fileStatus.value = t('project_closed')
 }
 
 function closeProject(): void {
@@ -173,15 +230,19 @@ function closeProject(): void {
 }
 
 function renameProject(): void {
-  const name = window.prompt(t('工程名称'), projectStore.project.name)
+  const name = window.prompt(t('project_name'), projectStore.project.name)
   if (name) projectStore.setProjectName(name)
 }
 
 function showSaveHistory(): void {
-  const records = recentProjects.value
-    .map((item) => `${new Date(item.lastOpenedAt).toLocaleString()}  ${item.name}`)
-    .join('\n')
-  window.alert(records || t('暂无保存记录'))
+  saveHistoryOpen.value = true
+}
+
+async function restoreSaveHistory(result: ProjectFileResult): Promise<void> {
+  const currentPath = projectPath.value
+  await applyLoadedProject({ ...result, path: currentPath })
+  projectStore.dirty = true
+  fileStatus.value = t('archive_restored_save_to_keep_changes')
 }
 
 function handleCommand(action: string): void {
@@ -212,7 +273,33 @@ function handleNativeCommand(event: Event): void {
 }
 
 function openLyricsImport(): void {
+  importDraft.value = null
   importOpen.value = true
+}
+
+function applyPreprocessedLyrics(text: string): void {
+  preprocessOpen.value = false
+  importDraft.value = text
+  importOpen.value = true
+}
+
+function openLyricsPreprocess(): void {
+  if (projectStore.project.lines.length) preprocessOpen.value = true
+}
+
+function applyAutomaticTiming(): void {
+  const duration =
+    playerStore.duration ||
+    timelineStore.waveform?.duration ||
+    projectStore.project.audio?.duration ||
+    0
+  if (duration <= 0) {
+    fileStatus.value = t('import_audio_before_using_auto_timing')
+    return
+  }
+  fileStatus.value = projectStore.applyAutomaticTiming(duration)
+    ? t('auto_timing_completed')
+    : t('there_are_no_tokens_available_for_auto_timing')
 }
 
 function openLyricsExport(): void {
@@ -234,8 +321,8 @@ async function applyLoadedProject(result: ProjectFileResult): Promise<void> {
   if (!result.path) projectStore.dirty = true
   projectPath.value = result.path
   loadAudio(result.audio)
-  fileStatus.value = result.path ? t('工程已打开') : t('已恢复自动保存')
-  if (result.audioMissing && window.confirm(t('工程引用的音频不存在。是否现在重新定位音频？'))) {
+  fileStatus.value = result.path ? t('project_opened') : t('autosave_restored')
+  if (result.audioMissing && window.confirm(t('the_project_audio_is_missing_locate_it_now'))) {
     const selection = await window.desktopApi.selectAudio()
     if (selection) {
       projectStore.setAudio({
@@ -244,7 +331,7 @@ async function applyLoadedProject(result: ProjectFileResult): Promise<void> {
         duration: result.project.audio?.duration ?? null
       })
       loadAudio(selection)
-      fileStatus.value = t('已重新定位音频，请保存工程')
+      fileStatus.value = t('audio_relocated_please_save_the_project')
     }
   }
 }
@@ -255,24 +342,27 @@ async function refreshRecentProjects(): Promise<void> {
 
 async function saveProject(): Promise<boolean> {
   try {
+    const snapshot = projectStore.snapshot()
     const result = await window.desktopApi.saveProject(
-      projectStore.snapshot(),
-      projectPath.value ?? undefined
+      snapshot,
+      projectPath.value ?? undefined,
+      windowSessionId
     )
     if (!result) return false
     projectPath.value = result.path
-    projectStore.markSaved()
-    fileStatus.value = t('已保存')
+    if (JSON.stringify(projectStore.snapshot()) === JSON.stringify(snapshot))
+      projectStore.markSaved()
+    fileStatus.value = t('saved')
     await refreshRecentProjects()
     return true
   } catch (error) {
-    fileStatus.value = error instanceof Error ? error.message : t('保存失败')
+    fileStatus.value = error instanceof Error ? error.message : t('save_failed')
     return false
   }
 }
 
-async function openProject(): Promise<void> {
-  continueAfterUnsavedCheck(openProjectFile)
+function openProject(): void {
+  requestWindowChoice({ type: 'open' })
 }
 
 async function openProjectFile(): Promise<void> {
@@ -283,26 +373,26 @@ async function openProjectFile(): Promise<void> {
       await refreshRecentProjects()
     }
   } catch (error) {
-    fileStatus.value = error instanceof Error ? error.message : t('打开失败')
+    fileStatus.value = error instanceof Error ? error.message : t('open_failed')
   }
 }
 
-async function openRecentProject(path: string): Promise<void> {
-  continueAfterUnsavedCheck(() => openRecentProjectFile(path))
+function openRecentProject(path: string): void {
+  requestWindowChoice({ type: 'recent', path })
 }
 
 async function openRecentProjectFile(path: string): Promise<void> {
   try {
     const result = await window.desktopApi.openRecentProject(path)
     if (!result) {
-      fileStatus.value = t('工程文件不存在或无法读取')
+      fileStatus.value = t('project_file_is_missing_or_unreadable')
       await refreshRecentProjects()
       return
     }
     await applyLoadedProject(result)
     await refreshRecentProjects()
   } catch (error) {
-    fileStatus.value = error instanceof Error ? error.message : t('打开最近工程失败')
+    fileStatus.value = error instanceof Error ? error.message : t('could_not_open_recent_project')
   }
 }
 
@@ -312,9 +402,12 @@ onUnmounted(() => {
   window.removeEventListener('project-open', openProject)
   window.removeEventListener('lyrics-import', openLyricsImport)
   window.removeEventListener('lyrics-export', openLyricsExport)
+  window.removeEventListener('lyrics-preprocess', openLyricsPreprocess)
+  window.removeEventListener('automatic-timing', applyAutomaticTiming)
   window.removeEventListener('app-command', handleNativeCommand)
   removeAppCloseListener?.()
   removeIntegrationListener?.()
+  removeRecentProjectsListener?.()
   if (autosaveTimer) clearInterval(autosaveTimer)
 })
 
@@ -323,25 +416,51 @@ onMounted(async () => {
   window.addEventListener('project-open', openProject)
   window.addEventListener('lyrics-import', openLyricsImport)
   window.addEventListener('lyrics-export', openLyricsExport)
+  window.addEventListener('lyrics-preprocess', openLyricsPreprocess)
+  window.addEventListener('automatic-timing', applyAutomaticTiming)
   window.addEventListener('app-command', handleNativeCommand)
   removeAppCloseListener = window.desktopApi.onAppCloseRequested(() => {
     continueAfterUnsavedCheck(() => window.desktopApi.confirmAppClose())
   })
   removeIntegrationListener = window.desktopApi.onIntegrationOpen(openPlayerSong)
-  autosaveTimer = setInterval(async () => {
-    if (!projectStore.dirty) return
-    try {
-      await window.desktopApi.autosaveProject(projectStore.snapshot())
-      fileStatus.value = t('已自动保存')
-    } catch {
-      fileStatus.value = t('自动保存失败')
-    }
-  }, 30_000)
+  removeRecentProjectsListener = window.desktopApi.onRecentProjectsChanged(() => {
+    void refreshRecentProjects()
+  })
+  const installAutosaveTimer = (): void => {
+    if (autosaveTimer) clearInterval(autosaveTimer)
+    autosaveTimer = null
+    if (!settingsStore.autosaveEnabled) return
+    autosaveTimer = setInterval(async () => {
+      if (!projectStore.dirty) return
+      try {
+        await window.desktopApi.autosaveProject(projectStore.snapshot(), windowSessionId)
+        fileStatus.value = t('autosaved')
+      } catch {
+        fileStatus.value = t('autosave_failed')
+      }
+    }, settingsStore.autosaveIntervalMs)
+  }
+  installAutosaveTimer()
+  watch(
+    () => [settingsStore.autosaveEnabled, settingsStore.autosaveIntervalMs],
+    installAutosaveTimer
+  )
   try {
+    appVersion.value = await window.desktopApi.getAppVersion()
     const bridgeReady = (await window.desktopApi.ping()) === 'pong'
-    ipcStatus.value = bridgeReady ? 'Main / Preload / Renderer OK' : t('响应异常')
+    ipcStatus.value = bridgeReady ? 'OK' : t('unexpected_response')
     if (bridgeReady && import.meta.env.DEV) console.info('[Lyric Timeline] IPC bridge ready')
     await refreshRecentProjects()
+    const launch = bridgeReady ? await window.desktopApi.takeWindowLaunch() : null
+    if (launch?.type === 'new') {
+      resetProject()
+      return
+    }
+    if (launch?.type === 'project') {
+      await applyLoadedProject(launch.result)
+      await refreshRecentProjects()
+      return
+    }
     const integration = bridgeReady ? await window.desktopApi.takePendingIntegration() : null
     if (integration) {
       applyPlayerSong(integration)
@@ -354,12 +473,12 @@ onMounted(async () => {
       const latest = await window.desktopApi.loadLastProject()
       if (latest) {
         await applyLoadedProject(latest)
-        fileStatus.value = t('已自动打开上次工程')
+        fileStatus.value = t('last_project_opened_automatically')
         await refreshRecentProjects()
       }
     }
   } catch {
-    ipcStatus.value = t('IPC 不可用')
+    ipcStatus.value = t('ipc_unavailable')
   }
 })
 </script>
@@ -367,6 +486,7 @@ onMounted(async () => {
 <template>
   <main class="shell">
     <AppHeader
+      :app-version="appVersion"
       :recent-projects="recentProjects"
       :project-path="projectPath"
       @command="handleCommand"
@@ -381,11 +501,16 @@ onMounted(async () => {
         @pointermove="resizeWorkspace"
       >
         <aside class="workspace-column tool-workspace">
-          <div class="workspace-pane"><LyricsPanel @request-import="importOpen = true" /></div>
+          <div class="workspace-pane">
+            <LyricsPanel
+              @request-import="openLyricsImport"
+              @request-preprocess="preprocessOpen = true"
+            />
+          </div>
           <div
             class="splitter splitter-horizontal"
             role="separator"
-            :aria-label="t('调整歌词与属性面板高度')"
+            :aria-label="t('resize_lyrics_and_inspector_panels')"
             @pointerdown="beginResize('left-rows', $event)"
             @pointerup="endResize"
             @pointercancel="endResize"
@@ -396,7 +521,7 @@ onMounted(async () => {
         <div
           class="splitter splitter-vertical"
           role="separator"
-          :aria-label="t('调整工具区宽度')"
+          :aria-label="t('resize_tool_area')"
           @pointerdown="beginResize('columns', $event)"
           @pointerup="endResize"
           @pointercancel="endResize"
@@ -407,7 +532,7 @@ onMounted(async () => {
           <div
             class="splitter splitter-horizontal"
             role="separator"
-            :aria-label="t('调整预览与时间轴高度')"
+            :aria-label="t('resize_preview_and_timeline')"
             @pointerdown="beginResize('right-rows', $event)"
             @pointerup="endResize"
             @pointercancel="endResize"
@@ -425,12 +550,32 @@ onMounted(async () => {
 
     <LyricsImportDialog
       :open="importOpen"
-      :initial-text="editableLyrics"
+      :initial-text="importDraft ?? editableLyrics"
       :initial-mode="projectStore.project.settings.tokenizer"
-      @close="importOpen = false"
+      @close="importOpen = false; importDraft = null"
       @import="importLyrics"
     />
+    <LyricsPreprocessDialog
+      :open="preprocessOpen"
+      :source="editableLyrics"
+      @close="preprocessOpen = false"
+      @apply="applyPreprocessedLyrics"
+    />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
+    <SaveHistoryDialog
+      :open="saveHistoryOpen"
+      :project-id="projectStore.project.id"
+      :project-name="projectStore.project.name"
+      @close="saveHistoryOpen = false"
+      @restored="restoreSaveHistory"
+    />
+    <WindowOpenDialog
+      :open="windowOpenDialogOpen"
+      :operation="pendingWindowOperation?.type === 'new' ? 'new' : 'open'"
+      @cancel="cancelWindowChoice"
+      @current="useCurrentWindow"
+      @new-window="useNewWindow"
+    />
     <ExportDialog :open="exportOpen" @close="exportOpen = false" />
     <TokenStructureDialog />
     <UnsavedChangesDialog
@@ -438,7 +583,7 @@ onMounted(async () => {
       :project-name="projectStore.project.name"
       :saving="savingBeforeContinue"
       @cancel="cancelPendingAction"
-      @discard="runPendingAction"
+      @discard="runPendingAction(true)"
       @save="saveAndRunPendingAction"
     />
   </main>

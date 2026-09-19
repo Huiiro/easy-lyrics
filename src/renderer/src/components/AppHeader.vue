@@ -5,13 +5,18 @@ import { useI18n } from '@renderer/i18n'
 import { getAudioPlayer } from '@renderer/services/audio-player'
 import { usePlayerStore } from '@renderer/stores/player'
 import { useProjectStore } from '@renderer/stores/project'
-import { shortcutActions, type ShortcutAction } from '@renderer/stores/settings'
+import {
+  formatShortcut,
+  shortcutActions,
+  useSettingsStore,
+  type ShortcutAction
+} from '@renderer/stores/settings'
 import { formatTime } from '@renderer/utils/time'
 import BaseDropdown from '@renderer/components/ui/BaseDropdown.vue'
 import BaseSelect from '@renderer/components/ui/BaseSelect.vue'
 import type { RecentProject } from '@shared/ipc'
 
-defineProps<{ recentProjects: RecentProject[]; projectPath: string | null }>()
+defineProps<{ recentProjects: RecentProject[]; projectPath: string | null; appVersion: string }>()
 const emit = defineEmits<{
   command: [action: string]
   openRecent: [path: string]
@@ -19,13 +24,16 @@ const emit = defineEmits<{
 
 const playerStore = usePlayerStore()
 const projectStore = useProjectStore()
+const settingsStore = useSettingsStore()
 const player = getAudioPlayer()
 const { t } = useI18n()
 const isMac = window.desktopApi.platform === 'darwin'
+const shortcutLabel = (action: ShortcutAction): string =>
+  formatShortcut(settingsStore.shortcuts[action], isMac)
 const editGroups = computed(() => {
   const groups = new Map<string, (typeof shortcutActions)[number][]>()
   for (const action of shortcutActions) {
-    if (action.group === '工程') continue
+    if (action.group === 'project') continue
     const actions = groups.get(action.group) ?? []
     actions.push(action)
     groups.set(action.group, actions)
@@ -36,6 +44,7 @@ const playbackRateOptions = [0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => ({
   value,
   label: `${value}×`
 }))
+const volumePercent = computed(() => Math.round(playerStore.volume * 100))
 
 async function togglePlayback(): Promise<void> {
   if (!playerStore.source) {
@@ -45,7 +54,7 @@ async function togglePlayback(): Promise<void> {
   try {
     await player.toggle()
   } catch {
-    playerStore.fail(t('无法开始播放，请重新选择音频'))
+    playerStore.fail(t('playback_could_not_start_select_the_audio_again'))
   }
 }
 
@@ -70,17 +79,16 @@ function openRecent(path: string): void {
 
 <template>
   <header class="unified-header" :class="{ mac: isMac, windows: !isMac }">
-    <nav v-if="!isMac" class="header-menus" :aria-label="t('应用菜单')">
+    <nav v-if="!isMac" class="header-menus" :aria-label="t('application_menu')">
       <BaseDropdown group="header-primary" :close-groups-on-open="['header-secondary']">
-        <template #trigger>{{ t('文件') }}</template>
+        <template #trigger>{{ t('file') }}</template>
         <div class="header-menu-popover">
-          <button type="button" @click="run('newProject')">{{ t('新建') }}</button>
-          <button type="button" @click="run('openProject')">{{ t('打开项目') }}</button>
-          <BaseDropdown
-            class="submenu"
-            group="header-secondary"
-          >
-            <template #trigger>{{ t('最近项目') }} <span>›</span></template>
+          <button type="button" @click="run('newProject')">{{ t('new') }}</button>
+          <button type="button" @click="run('openProject')">
+            <span>{{ t('open_project') }}</span><kbd>{{ shortcutLabel('openProject') }}</kbd>
+          </button>
+          <BaseDropdown class="submenu" group="header-secondary">
+            <template #trigger>{{ t('recent_projects') }} <span>›</span></template>
             <div>
               <button
                 v-for="recent in recentProjects"
@@ -90,22 +98,32 @@ function openRecent(path: string): void {
               >
                 {{ recent.name }}
               </button>
-              <span v-if="!recentProjects.length" class="menu-empty">{{ t('暂无最近项目') }}</span>
+              <span v-if="!recentProjects.length" class="menu-empty">{{
+                t('no_recent_projects_alternate')
+              }}</span>
             </div>
           </BaseDropdown>
           <hr />
-          <button type="button" @click="run('renameProject')">{{ t('重命名项目') }}</button>
-          <button type="button" @click="run('closeProject')">{{ t('关闭项目') }}</button>
-          <button type="button" @click="run('saveProject')">{{ t('保存') }}</button>
-          <button type="button" @click="run('saveHistory')">{{ t('查看保存记录') }}</button>
+          <button type="button" @click="run('renameProject')">{{ t('rename_project') }}</button>
+          <button type="button" @click="run('closeProject')">{{ t('close_project') }}</button>
+          <button type="button" @click="run('saveProject')">
+            <span>{{ t('save') }}</span><kbd>{{ shortcutLabel('saveProject') }}</kbd>
+          </button>
+          <button type="button" @click="run('saveHistory')">{{ t('view_save_history') }}</button>
           <hr />
-          <button type="button" @click="run('selectAudio')">{{ t('导入歌曲') }}</button>
-          <button type="button" @click="run('importLyrics')">{{ t('导入歌词') }}</button>
-          <button type="button" @click="run('exportLyrics')">{{ t('导出') }}</button>
+          <button type="button" @click="run('selectAudio')">
+            <span>{{ t('import_audio') }}</span><kbd>{{ shortcutLabel('selectAudio') }}</kbd>
+          </button>
+          <button type="button" @click="run('importLyrics')">
+            <span>{{ t('import_lyrics') }}</span><kbd>{{ shortcutLabel('importLyrics') }}</kbd>
+          </button>
+          <button type="button" @click="run('exportLyrics')">
+            <span>{{ t('export') }}</span><kbd>{{ shortcutLabel('exportLyrics') }}</kbd>
+          </button>
         </div>
       </BaseDropdown>
       <BaseDropdown group="header-primary" :close-groups-on-open="['header-secondary']">
-        <template #trigger>{{ t('编辑') }}</template>
+        <template #trigger>{{ t('edit') }}</template>
         <div class="header-menu-popover edit-menu">
           <BaseDropdown
             v-for="group in editGroups"
@@ -122,10 +140,16 @@ function openRecent(path: string): void {
                 :title="t(action.description)"
                 @click="run(action.id)"
               >
-                {{ t(action.label) }}
+                <span>{{ t(action.label) }}</span><kbd>{{ shortcutLabel(action.id) }}</kbd>
               </button>
             </div>
           </BaseDropdown>
+        </div>
+      </BaseDropdown>
+      <BaseDropdown group="header-primary" :close-groups-on-open="['header-secondary']">
+        <template #trigger>{{ t('help') }}</template>
+        <div class="header-menu-popover help-menu">
+          <span class="menu-version">{{ t('version') }} {{ appVersion || '—' }}</span>
         </div>
       </BaseDropdown>
     </nav>
@@ -136,15 +160,13 @@ function openRecent(path: string): void {
       :close-groups-on-open="['header-secondary']"
     >
       <template #trigger>
-        <span class="document-icon">▤</span>
         <span>{{ projectStore.dirty ? '● ' : '' }}{{ projectStore.project.name }}</span>
-        <span class="chevron" aria-hidden="true">⌄</span>
       </template>
-      <div class="project-document-popover" :title="projectPath ?? t('未保存工程')">
-        <button type="button" @click="run('newProject')">＋ {{ t('新建工程') }}</button>
-        <button type="button" @click="run('openProject')">{{ t('打开工程…') }}</button>
+      <div class="project-document-popover" :title="projectPath ?? t('unsaved_project')">
+        <button type="button" @click="run('newProject')">＋ {{ t('new_project_alternate') }}</button>
+        <button type="button" @click="run('openProject')">{{ t('open_project_dialog') }}</button>
         <hr />
-        <p>{{ t('最近工程') }}</p>
+        <p>{{ t('recent_projects') }}</p>
         <button
           v-for="recent in recentProjects"
           :key="recent.path"
@@ -154,34 +176,54 @@ function openRecent(path: string): void {
         >
           {{ recent.name }}
         </button>
-        <span v-if="!recentProjects.length" class="menu-empty">{{ t('暂无最近工程') }}</span>
+        <span v-if="!recentProjects.length" class="menu-empty">{{ t('no_recent_projects') }}</span>
       </div>
     </BaseDropdown>
 
     <div class="header-audio-controls">
       <button type="button" class="header-audio-file" @click="run('selectAudio')">
-        {{ playerStore.fileName ?? t('选择音频') }}
+        {{ playerStore.fileName ?? t('select_audio') }}
       </button>
       <button
         type="button"
         class="header-play"
-        :aria-label="playerStore.playing ? t('暂停') : t('播放')"
+        :aria-label="playerStore.playing ? t('pause') : t('play')"
         @click="togglePlayback"
       >
         {{ playerStore.playing ? 'Ⅱ' : '▶' }}
       </button>
-      <time>{{ formatTime(playerStore.currentTime) }}</time>
-      <label class="header-volume">
-        <span>◖</span>
-        <input type="range" min="0" max="1" step="0.01" :value="playerStore.volume" @input="changeVolume" />
+      <time class="header-time">
+        <span>{{ formatTime(playerStore.currentTime) }}</span>
+        <span class="header-time-separator">/</span>
+        <span>{{ formatTime(playerStore.duration) }}</span>
+      </time>
+      <label class="header-volume" :title="`${t('volume')}: ${volumePercent}%`">
+        <svg class="header-volume-icon" viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3 8h3l4-3.5v11L6 12H3z" />
+          <path v-if="volumePercent > 0" d="M12.5 7a4 4 0 0 1 0 6" />
+          <path v-if="volumePercent >= 50" d="M14.5 4.5a7.2 7.2 0 0 1 0 11" />
+          <path v-if="volumePercent === 0" d="m13 8 4 4m0-4-4 4" />
+        </svg>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          :value="playerStore.volume"
+          :aria-label="t('volume')"
+          @input="changeVolume"
+        />
+        <output>{{ volumePercent }}%</output>
       </label>
       <BaseSelect
         :model-value="playerStore.playbackRate"
         :options="playbackRateOptions"
-        :aria-label="t('播放速度')"
+        :aria-label="t('playback_speed')"
         @update:model-value="changeRate"
       />
-      <button type="button" class="header-settings" :title="t('设置')" @click="run('settings')">⚙</button>
+      <button type="button" class="header-settings" :title="t('settings')" @click="run('settings')">
+        ⚙
+      </button>
     </div>
   </header>
 </template>

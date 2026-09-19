@@ -1,0 +1,59 @@
+appId: com.huiiro.lyrictimeline
+productName: Lyric Timeline
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+npmRebuild: false
+
+protocols:
+  - name: Lyric Timeline Link
+    schemes:
+      - lyric-timeline
+
+win:
+  executableName: lyric-timeline
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  shortcutName: Lyric Timeline
+
+mac:
+  category: public.app-category.music
+  icon: build/icon.png
+  target:
+    - dmg
+    - zip
+  artifactName: ${productName}-${version}-macos-${arch}.${ext}
+
+dmg:
+  artifactName: ${productName}-${version}-macos-${arch}.${ext}
+
+linux:
+  category: AudioVideo
+  icon: build/icon.png
+  target:
+    - AppImage
+    - deb
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+publish:
+  provider: github
+  owner: Huiiro
+  repo: easy-lyrics
+  releaseType: release

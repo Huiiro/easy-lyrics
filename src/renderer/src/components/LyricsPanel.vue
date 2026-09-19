@@ -24,15 +24,15 @@ const expandedLineIndex = computed(() =>
   manuallyFocusedLineIndex.value !== null
     ? manuallyFocusedLineIndex.value
     : timelineStore.followLyrics && playerStore.playing && playbackLineIndex.value >= 0
-    ? playbackLineIndex.value
-    : projectStore.currentLineIndex
+      ? playbackLineIndex.value
+      : projectStore.currentLineIndex
 )
 const lineLayoutKey = computed(() =>
   projectStore.project.lines
     .map((line) => `${line.id}:${line.tokens.map((token) => token.id).join(',')}`)
     .join('|')
 )
-const emit = defineEmits<{ requestImport: [] }>()
+const emit = defineEmits<{ requestImport: []; requestPreprocess: [] }>()
 
 const statusSymbol = {
   pending: '○',
@@ -60,7 +60,7 @@ function selectToken(token: LyricToken, lineIndex: number, tokenIndex: number): 
 }
 
 function smartTime(): void {
-  if (playerStore.duration > 0) projectStore.applyAutomaticTiming(playerStore.duration)
+  window.dispatchEvent(new CustomEvent('automatic-timing'))
 }
 
 function copyTiming(): void {
@@ -106,60 +106,68 @@ watch(
 <template>
   <aside class="panel lyrics-panel">
     <header class="panel-header">
-      <p class="panel-label">{{ t('歌词') }}</p>
+      <p class="panel-label">{{ t('lyrics') }}</p>
       <div class="panel-actions">
+        <button
+          v-if="projectStore.project.lines.length"
+          class="text-button"
+          type="button"
+          :title="t('clean_lyrics_with_rules_or_regular_expressions')"
+          @click="emit('requestPreprocess')"
+        >
+          {{ t('preprocess') }}
+        </button>
         <button
           v-if="projectStore.project.lines.length"
           class="text-button"
           type="button"
           :class="{ active: timelineStore.followLyrics }"
           :aria-pressed="timelineStore.followLyrics"
-          :title="t('播放时自动滚动并高亮当前歌词')"
+          :title="t('scroll_and_highlight_the_current_lyric_during_playback')"
           @click="timelineStore.followLyrics = !timelineStore.followLyrics"
         >
-          {{ timelineStore.followLyrics ? `◉ ${t('跟随')}` : `○ ${t('跟随')}` }}
+          {{ timelineStore.followLyrics ? `◉ ${t('follow')}` : `○ ${t('follow')}` }}
         </button>
         <button
           v-if="projectStore.project.lines.length"
           class="text-button"
           type="button"
           :disabled="!projectStore.canCopyLineTiming"
-          :title="t('复制当前句的逐词时间结构')"
+          :title="t('copy_word_timing_from_the_current_line')"
           @click="copyTiming"
         >
-          {{ t('复制') }}
+          {{ t('copy') }}
         </button>
         <button
           v-if="projectStore.project.lines.length"
           class="text-button"
           type="button"
           :disabled="!projectStore.canPasteLineTiming"
-          :title="t('从当前播放头位置粘贴到相同歌词')"
+          :title="t('paste_timing_at_the_playhead_into_matching_lyrics')"
           @click="pasteTiming"
         >
-          {{ t('粘贴') }}
+          {{ t('paste') }}
         </button>
         <button
           v-if="projectStore.project.lines.length"
           class="text-button"
           type="button"
-          :disabled="!playerStore.duration"
-          :title="playerStore.duration ? t('根据音频时长和已有时间标签生成逐词时间') : t('请先导入音频')"
+          :title="t('generate_word_timing_from_audio_duration_and_existing_timestamps')"
           @click="smartTime"
         >
-          {{ t('智能打轴') }}
+          {{ t('auto_timing') }}
         </button>
         <button class="text-button" type="button" @click="emit('requestImport')">
-          {{ projectStore.project.lines.length ? t('编辑') : t('导入') }}
+          {{ projectStore.project.lines.length ? t('edit') : t('import') }}
         </button>
       </div>
     </header>
 
     <div v-if="projectStore.project.lines.length === 0" class="panel-placeholder">
       <div>
-        <p>{{ t('还没有歌词') }}</p>
+        <p>{{ t('no_lyrics_yet') }}</p>
         <button class="secondary-button" type="button" @click="emit('requestImport')">
-          {{ t('粘贴歌词') }}
+          {{ t('paste_lyrics') }}
         </button>
       </div>
     </div>
@@ -178,8 +186,8 @@ watch(
           type="button"
           :title="
             getLineStart(line) === null
-              ? t('该行尚未打轴')
-              : t('定位到 {time}', { time: formatTime(getLineStart(line)!) })
+              ? t('this_line_has_not_been_timed')
+              : t('go_to_time', { time: formatTime(getLineStart(line)!) })
           "
           @click="selectLine(line, lineIndex)"
         >
@@ -205,7 +213,9 @@ watch(
               timed: token.start !== null
             }"
             :title="
-              token.start === null ? t('该 Token 尚未打轴') : t('定位到 {time}', { time: formatTime(token.start) })
+              token.start === null
+                ? t('this_token_has_not_been_timed')
+                : t('go_to_time', { time: formatTime(token.start) })
             "
             @click="selectToken(token, lineIndex, tokenIndex)"
           >

@@ -36,6 +36,32 @@ describe('lyric tokenizers', () => {
       '2026'
     ])
   })
+
+  it('splits Japanese into karaoke-friendly mora and Korean into syllables', () => {
+    expect(smartTokenizer.tokenize('明日は きょう キャット 한글 노래')).toEqual([
+      '明',
+      '日',
+      'は',
+      'きょ',
+      'う',
+      'キャ',
+      'ッ',
+      'ト',
+      '한',
+      '글',
+      '노',
+      '래'
+    ])
+  })
+
+  it('uses Unicode word boundaries for languages without spaces', () => {
+    expect(smartTokenizer.tokenize('ภาษาไทย ภาษาไทย')).toEqual(['ภาษา', 'ไทย', 'ภาษา', 'ไทย'])
+    expect(smartTokenizer.tokenize('مرحبا بالعالم')).toEqual(['مرحبا', 'بالعالم'])
+  })
+
+  it('keeps combining marks attached in character mode', () => {
+    expect(charTokenizer.tokenize('か\u3099 café')).toEqual(['か\u3099', 'c', 'a', 'f', 'é'])
+  })
 })
 
 describe('createLyricLines', () => {

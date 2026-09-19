@@ -38,6 +38,7 @@ export function useGlobalShortcuts(): void {
       openProject: 'project-open',
       saveProject: 'project-save',
       importLyrics: 'lyrics-import',
+      preprocessLyrics: 'lyrics-preprocess',
       exportLyrics: 'lyrics-export',
       selectAudio: 'audio-select',
       focusTokenSplit: 'token-split-focus'
@@ -114,7 +115,7 @@ export function useGlobalShortcuts(): void {
       toggleTimelineFollow: () => (timelineStore.followPlayback = !timelineStore.followPlayback),
       copyLineTiming: () => projectStore.copyActiveLineTiming(),
       pasteLineTiming: () => projectStore.pasteLineTimingAt(playerStore.currentTime),
-      automaticTiming: () => projectStore.applyAutomaticTiming(duration),
+      automaticTiming: () => window.dispatchEvent(new CustomEvent('automatic-timing')),
       mergePreviousToken: () => projectStore.mergeActiveToken(-1),
       mergeNextToken: () => projectStore.mergeActiveToken(1),
       tokenEditMode: () => (timelineStore.editMode = 'token'),

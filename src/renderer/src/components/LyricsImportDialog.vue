@@ -52,44 +52,52 @@ function submit(): void {
       <header class="dialog-header">
         <div>
           <p class="eyebrow">Lyrics</p>
-          <h2 id="lyrics-import-title">{{ initialText ? t('编辑歌词') : t('导入歌词') }}</h2>
+          <h2 id="lyrics-import-title">
+            {{ initialText ? t('edit_lyrics') : t('import_lyrics') }}
+          </h2>
         </div>
-        <button class="icon-button" type="button" :aria-label="t('关闭')" @click="emit('close')">
+        <button class="icon-button" type="button" :aria-label="t('close')" @click="emit('close')">
           ×
         </button>
       </header>
 
-      <label class="field-label" for="lyrics-source">{{ t('每行一句歌词') }}</label>
+      <label class="field-label" for="lyrics-source">{{ t('one_lyric_line_per_row') }}</label>
       <textarea
         id="lyrics-source"
         ref="textarea"
         v-model="text"
         rows="12"
-        :placeholder="t('歌词输入示例')"
+        :placeholder="t('lyrics_input_example')"
       />
 
       <fieldset class="tokenizer-options">
-        <legend>{{ t('拆分方式') }}</legend>
-        <label><input v-model="mode" type="radio" value="smart" /> {{ t('智能') }}</label>
-        <label><input v-model="mode" type="radio" value="char" /> {{ t('逐字') }}</label>
-        <label><input v-model="mode" type="radio" value="word" /> {{ t('逐词') }}</label>
+        <legend>{{ t('tokenization') }}</legend>
+        <label><input v-model="mode" type="radio" value="smart" /> {{ t('smart') }}</label>
+        <label><input v-model="mode" type="radio" value="char" /> {{ t('character') }}</label>
+        <label><input v-model="mode" type="radio" value="word" /> {{ t('word') }}</label>
       </fieldset>
 
       <p class="tokenizer-hint">
-        {{ t('支持普通文本和 LRC 时间标签；智能模式按中文字、英文单词和数字拆分。') }}
+        {{
+          t(
+            'supports_plain_text_and_lrc_timestamps_smart_mode_recognizes_cjk_and_languages_without_spaces'
+          )
+        }}
       </p>
 
       <footer class="dialog-footer">
-        <span>{{ t('{lines} 行 · {tokens} 个 Token', preview) }}</span>
+        <span>{{ t('lines_lines_tokens_tokens', preview) }}</span>
         <div>
-          <button class="secondary-button" type="button" @click="emit('close')">{{ t('取消') }}</button>
+          <button class="secondary-button" type="button" @click="emit('close')">
+            {{ t('cancel') }}
+          </button>
           <button
             class="primary-button"
             type="button"
             :disabled="preview.lines === 0"
             @click="submit"
           >
-            {{ initialText ? t('应用修改') : t('导入') }}
+            {{ initialText ? t('apply_changes') : t('import') }}
           </button>
         </div>
       </footer>

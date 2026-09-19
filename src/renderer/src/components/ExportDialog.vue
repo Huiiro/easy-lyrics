@@ -27,7 +27,7 @@ const template = computed(
 )
 const formatOptions = computed(() => [
   ...BUILTIN_EXPORT_FORMATS.map((item) => ({ value: item.id, label: item.name })),
-  { value: 'template', label: t('自定义模板') }
+  { value: 'template', label: t('custom_template') }
 ])
 const templateOptions = computed(() =>
   templates.value.map((item) => ({ value: item.id, label: item.name }))
@@ -43,7 +43,7 @@ const extension = computed(() =>
     : (BUILTIN_EXPORT_FORMATS.find((item) => item.id === format.value)?.extension ?? 'txt')
 )
 const fileName = computed(
-  () => `${projectStore.project.name || t('未命名工程')}.${extension.value}`
+  () => `${projectStore.project.name || t('untitled_project')}.${extension.value}`
 )
 const previewStats = computed(() => ({
   lines: preview.value ? preview.value.split('\n').length : 0,
@@ -70,9 +70,9 @@ async function save(): Promise<void> {
       extension.value,
       projectStore.project.name
     )
-    status.value = saved ? t('导出完成') : t('已取消')
+    status.value = saved ? t('export_complete') : t('canceled')
   } catch (error) {
-    status.value = error instanceof Error ? error.message : t('导出失败')
+    status.value = error instanceof Error ? error.message : t('export_failed')
   }
 }
 </script>
@@ -82,11 +82,11 @@ async function save(): Promise<void> {
     <div class="export-dialog">
       <header class="export-dialog-header">
         <div>
-          <p class="eyebrow">{{ t('导出') }}</p>
-          <h2 id="export-title">{{ t('导出歌词') }}</h2>
-          <p>{{ t('选择导出格式并在保存前检查生成内容。') }}</p>
+          <p class="eyebrow">{{ t('export') }}</p>
+          <h2 id="export-title">{{ t('export_lyrics') }}</h2>
+          <p>{{ t('choose_a_format_and_review_the_generated_content_before_saving') }}</p>
         </div>
-        <button class="icon-button" type="button" :aria-label="t('关闭')" @click="emit('close')">
+        <button class="icon-button" type="button" :aria-label="t('close')" @click="emit('close')">
           ×
         </button>
       </header>
@@ -94,54 +94,56 @@ async function save(): Promise<void> {
       <div class="export-layout">
         <aside class="export-form">
           <div class="export-section-heading">
-            <span>{{ t('导出设置') }}</span>
+            <span>{{ t('export_settings') }}</span>
             <small>01</small>
           </div>
 
           <label>
-            <span>{{ t('文件格式') }}</span>
+            <span>{{ t('file_format') }}</span>
             <BaseSelect v-model="format" :options="formatOptions" />
           </label>
 
           <div v-if="format === 'template'" class="export-template-options">
             <label>
-              <span>{{ t('导出模板') }}</span>
+              <span>{{ t('export_templates') }}</span>
               <BaseSelect v-model="templateId" :options="templateOptions" />
             </label>
             <div class="template-summary">
               <strong>.{{ template.extension.replace(/^\./, '') || 'txt' }}</strong>
               <span>{{ template.name }}</span>
             </div>
-            <p class="template-hint">{{ t('模板内容请在“设置 → 导出模板”中管理。') }}</p>
+            <p class="template-hint">
+              {{ t('manage_template_contents_in_settings_export_templates') }}
+            </p>
           </div>
 
           <div class="export-file-summary">
-            <span>{{ t('输出文件') }}</span>
+            <span>{{ t('output_file') }}</span>
             <strong :title="fileName">{{ fileName }}</strong>
-            <small>{{ t('{lines} 行 · {characters} 个字符', previewStats) }}</small>
+            <small>{{ t('lines_lines_characters_characters', previewStats) }}</small>
           </div>
         </aside>
 
         <section class="export-preview">
           <header>
             <div>
-              <strong>{{ t('实时预览') }}</strong>
+              <strong>{{ t('live_preview') }}</strong>
               <span>{{ fileName }}</span>
             </div>
             <code>.{{ extension }}</code>
           </header>
-          <pre :class="{ empty: !preview }">{{ preview || t('暂无歌词可导出') }}</pre>
+          <pre :class="{ empty: !preview }">{{ preview || t('no_lyrics_to_export') }}</pre>
         </section>
       </div>
 
       <footer class="dialog-actions export-dialog-actions">
-        <span :class="{ visible: status }">{{ status || t('准备导出') }}</span>
+        <span :class="{ visible: status }">{{ status || t('ready_to_export') }}</span>
         <div>
           <button class="secondary-button" type="button" @click="emit('close')">
-            {{ t('取消') }}
+            {{ t('cancel') }}
           </button>
           <button class="primary-button" type="button" :disabled="!preview" @click="save">
-            {{ t('导出文件') }}
+            {{ t('export_file') }}
           </button>
         </div>
       </footer>

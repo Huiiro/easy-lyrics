@@ -61,7 +61,7 @@ async function chooseAudio(): Promise<void> {
     playerStore.beginLoad(selection.url, selection.name)
     player.load(selection.url)
   } catch {
-    playerStore.fail(t('无法打开文件选择器，请重启应用后重试'))
+    playerStore.fail(t('could_not_open_the_file_picker_restart_the_app_and_try_again'))
   }
 }
 
@@ -80,11 +80,10 @@ function endSeek(event: Event): void {
   seek(event)
   seeking.value = false
 }
-
 </script>
 
 <template>
-  <section class="timeline-player timeline-progress-only" :aria-label="t('播放进度')">
+  <section class="timeline-player timeline-progress-only" :aria-label="t('playback_progress')">
     <span class="timecode">{{ formatTime(displayedTime) }}</span>
     <input
       class="progress"
@@ -94,7 +93,7 @@ function endSeek(event: Event): void {
       step="0.001"
       :value="displayedTime"
       :disabled="!playerStore.source"
-      :aria-label="t('播放进度')"
+      :aria-label="t('playback_progress')"
       @pointerdown="beginSeek"
       @input="seek"
       @change="endSeek"

@@ -37,7 +37,13 @@ type Interaction =
       additiveIds: string[]
     }
   | {
-      kind: 'token-move' | 'token-group-move' | 'token-left' | 'token-right' | 'line-move'
+      kind:
+        | 'token-move'
+        | 'token-group-move'
+        | 'token-group-duration'
+        | 'token-left'
+        | 'token-right'
+        | 'line-move'
       lineIndex: number
       tokenIndex: number
       originTime: number
@@ -47,7 +53,9 @@ type Interaction =
 
 let interaction: Interaction | null = null
 const selectionRect = ref<{ x: number; y: number; width: number; height: number } | null>(null)
-const contextMenu = ref<{ x: number; y: number; lineIndex: number; tokenIndex: number } | null>(null)
+const contextMenu = ref<{ x: number; y: number; lineIndex: number; tokenIndex: number } | null>(
+  null
+)
 
 const player = getAudioPlayer()
 const playerStore = usePlayerStore()
@@ -57,7 +65,12 @@ const { t } = useI18n()
 
 const loopRange = computed(() => {
   const token = projectStore.activeToken
-  if (token?.start === null || token?.start === undefined || token.end === null || token.end <= token.start) {
+  if (
+    token?.start === null ||
+    token?.start === undefined ||
+    token.end === null ||
+    token.end <= token.start
+  ) {
     return null
   }
   return { start: token.start, end: token.end }
@@ -71,11 +84,16 @@ const canMergeSelection = computed(() => {
       selectedIds.has(token.id) ? [{ lineIndex, tokenIndex }] : []
     )
   )
-  if (locations.length !== selectedIds.size || locations.some((item) => item.lineIndex !== locations[0]?.lineIndex)) {
+  if (
+    locations.length !== selectedIds.size ||
+    locations.some((item) => item.lineIndex !== locations[0]?.lineIndex)
+  ) {
     return false
   }
   locations.sort((left, right) => left.tokenIndex - right.tokenIndex)
-  return locations.every((item, index) => item.tokenIndex === (locations[0]?.tokenIndex ?? 0) + index)
+  return locations.every(
+    (item, index) => item.tokenIndex === (locations[0]?.tokenIndex ?? 0) + index
+  )
 })
 
 let resizeObserver: ResizeObserver | null = null
@@ -160,13 +178,84 @@ function previewEdit(
     end: number | null
   }> = []
 
-  if (edit.kind === 'token-group-move') {
-    const selected = edit.snapshots.filter((token) => timelineStore.selectedTokenIds.includes(token.id))
+  if (edit.kind === 'token-group-duration') {
+    const selected = edit.snapshots.filter(
+      (token) => timelineStore.selectedTokenIds.includes(token.id) && token.start !== null
+    )
+    const selectedIds = new Set(selected.map((token) => token.id))
+    const originalEnds = selected.map((token) => {
+      const line = edit.snapshots.filter((item) => item.lineIndex === token.lineIndex)
+      const next = line.find((item) => item.tokenIndex === token.tokenIndex + 1)
+      return token.end ?? next?.start ?? (token.start as number) + 0.12
+    })
+    const minimumDelta = Math.max(
+      ...selected.map(
+        (token, index) => (token.start as number) + MIN_TOKEN_DURATION - (originalEnds[index] ?? 0)
+      )
+    )
+    let delta = Math.max(rawDelta, minimumDelta)
+    if (!timelineStore.adjacentLocked) {
+      const snapped = bestSnapDelta(
+        originalEnds,
+        delta,
+        snapCandidates(edit.snapshots, selectedIds)
+      )
+      delta = Math.max(snapped.delta, minimumDelta)
+      timelineStore.snapGuideTime = delta === snapped.delta ? snapped.guide : null
+    }
+
+    const lines = new Map<number, typeof selected>()
+    for (const token of selected) {
+      const group = lines.get(token.lineIndex) ?? []
+      group.push(token)
+      lines.set(token.lineIndex, group)
+    }
+    if (timelineStore.adjacentLocked && duration() > 0) {
+      const maximumDelta = Math.min(
+        ...Array.from(lines.values(), (tokens) => {
+          const firstStart = tokens[0]?.start ?? 0
+          const totalDuration = tokens.reduce((total, token) => {
+            const snapshotIndex = selected.indexOf(token)
+            return (
+              total +
+              (originalEnds[snapshotIndex] ?? (token.start as number) + 0.12) -
+              (token.start as number)
+            )
+          }, 0)
+          return (duration() - firstStart - totalDuration) / tokens.length
+        })
+      )
+      delta = Math.max(minimumDelta, Math.min(delta, maximumDelta))
+    }
+    for (const tokens of lines.values()) {
+      tokens.sort((left, right) => left.tokenIndex - right.tokenIndex)
+      let cursor = tokens[0]?.start ?? 0
+      for (const token of tokens) {
+        const snapshotIndex = selected.indexOf(token)
+        const originalEnd = originalEnds[snapshotIndex] ?? (token.start as number) + 0.12
+        const tokenDuration = Math.max(
+          MIN_TOKEN_DURATION,
+          originalEnd - (token.start as number) + delta
+        )
+        const start = timelineStore.adjacentLocked ? cursor : (token.start as number)
+        const end = Math.min(start + tokenDuration, duration() || Number.POSITIVE_INFINITY)
+        updates.push({ ...token, start, end })
+        cursor = end
+      }
+    }
+  } else if (edit.kind === 'token-group-move') {
+    const selected = edit.snapshots.filter((token) =>
+      timelineStore.selectedTokenIds.includes(token.id)
+    )
     let delta = clampGroupDelta(selected, rawDelta, duration() || Number.POSITIVE_INFINITY)
     const boundaries = selected.flatMap((token) =>
       token.start === null ? [] : token.end === null ? [token.start] : [token.start, token.end]
     )
-    const snapped = bestSnapDelta(boundaries, delta, snapCandidates(edit.snapshots, new Set(selected.map((token) => token.id))))
+    const snapped = bestSnapDelta(
+      boundaries,
+      delta,
+      snapCandidates(edit.snapshots, new Set(selected.map((token) => token.id)))
+    )
     delta = clampGroupDelta(selected, snapped.delta, duration() || Number.POSITIVE_INFINITY)
     timelineStore.snapGuideTime = delta === snapped.delta ? snapped.guide : null
     for (const token of selected) {
@@ -258,12 +347,20 @@ function handlePointerDown(event: PointerEvent): void {
   if (!canvas.value || !playerStore.source) return
   const x = pointerX(event)
   contextMenu.value = null
-  if (event.button === 1 || (event.button === 0 && event.shiftKey && event.clientY - canvas.value.getBoundingClientRect().top <= 27)) {
+  if (
+    event.button === 1 ||
+    (event.button === 0 &&
+      event.shiftKey &&
+      event.clientY - canvas.value.getBoundingClientRect().top <= 27)
+  ) {
     timelineStore.followPlayback = false
     interaction = { kind: 'pan', lastX: x }
   } else if (event.button === 0) {
     const hit = renderer?.hitTest(x, event.clientY - canvas.value.getBoundingClientRect().top)
-    if (hit?.type === 'playhead' || (!hit && event.clientY - canvas.value.getBoundingClientRect().top <= 27)) {
+    if (
+      hit?.type === 'playhead' ||
+      (!hit && event.clientY - canvas.value.getBoundingClientRect().top <= 27)
+    ) {
       interaction = { kind: 'seek' }
       seekAt(x)
     } else if (hit?.lineIndex !== undefined && hit.tokenIndex !== undefined) {
@@ -290,12 +387,16 @@ function handlePointerDown(event: PointerEvent): void {
         hit.type === 'token-left'
           ? 'token-left'
           : hit.type === 'token-right'
-            ? 'token-right'
+            ? timelineStore.selectedTokenIds.length > 1
+              ? 'token-group-duration'
+              : 'token-right'
             : timelineStore.selectedTokenIds.length > 1
-              ? 'token-group-move'
+              ? event.altKey
+                ? 'token-group-duration'
+                : 'token-group-move'
               : timelineStore.editMode === 'line'
-              ? 'line-move'
-              : 'token-move'
+                ? 'line-move'
+                : 'token-move'
       interaction = {
         kind,
         lineIndex: hit.lineIndex,
@@ -306,7 +407,8 @@ function handlePointerDown(event: PointerEvent): void {
       }
     } else {
       const y = event.clientY - canvas.value.getBoundingClientRect().top
-      const additiveIds = event.metaKey || event.ctrlKey || event.shiftKey ? [...timelineStore.selectedTokenIds] : []
+      const additiveIds =
+        event.metaKey || event.ctrlKey || event.shiftKey ? [...timelineStore.selectedTokenIds] : []
       if (!additiveIds.length) clearTokenSelection()
       interaction = { kind: 'marquee', startX: x, startY: y, additiveIds }
       selectionRect.value = { x, y, width: 0, height: 0 }
@@ -336,14 +438,21 @@ function handlePointerMove(event: PointerEvent): void {
       height: Math.abs(y - interaction.startY)
     }
     const rect = selectionRect.value
-    const ids = timingSnapshots().filter((token) => {
-      if (token.start === null) return false
-      const end = token.end ?? token.start + 0.12
-      const x1 = (token.start - timelineStore.startTime) * timelineStore.pixelsPerSecond
-      const x2 = (end - timelineStore.startTime) * timelineStore.pixelsPerSecond
-      const tokenY = canvasHeight.value - 42
-      return x2 >= rect.x && x1 <= rect.x + rect.width && tokenY + 27 >= rect.y && tokenY <= rect.y + rect.height
-    }).map((token) => token.id)
+    const ids = timingSnapshots()
+      .filter((token) => {
+        if (token.start === null) return false
+        const end = token.end ?? token.start + 0.12
+        const x1 = (token.start - timelineStore.startTime) * timelineStore.pixelsPerSecond
+        const x2 = (end - timelineStore.startTime) * timelineStore.pixelsPerSecond
+        const tokenY = canvasHeight.value - 42
+        return (
+          x2 >= rect.x &&
+          x1 <= rect.x + rect.width &&
+          tokenY + 27 >= rect.y &&
+          tokenY <= rect.y + rect.height
+        )
+      })
+      .map((token) => token.id)
     timelineStore.selectedTokenIds = [...new Set([...interaction.additiveIds, ...ids])]
   } else {
     previewEdit(event, interaction)
@@ -368,14 +477,22 @@ function clearTokenSelection(): void {
 
 function handleContextMenu(event: MouseEvent): void {
   if (!canvas.value) return
-  const hit = renderer?.hitTest(pointerX(event), event.clientY - canvas.value.getBoundingClientRect().top)
+  const hit = renderer?.hitTest(
+    pointerX(event),
+    event.clientY - canvas.value.getBoundingClientRect().top
+  )
   if (hit?.lineIndex === undefined || hit.tokenIndex === undefined) {
     contextMenu.value = null
     return
   }
   projectStore.selectToken(hit.lineIndex, hit.tokenIndex)
   if (!timelineStore.selectedTokenIds.includes(hit.id)) timelineStore.selectedTokenIds = [hit.id]
-  contextMenu.value = { x: event.clientX, y: event.clientY, lineIndex: hit.lineIndex, tokenIndex: hit.tokenIndex }
+  contextMenu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    lineIndex: hit.lineIndex,
+    tokenIndex: hit.tokenIndex
+  }
 }
 
 function mergeFromMenu(direction: -1 | 1): void {
@@ -555,16 +672,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="timeline" :aria-label="t('时间轴')">
+  <section class="timeline" :aria-label="t('timeline')">
     <PlayerBar />
     <header class="timeline-toolbar">
       <div>
-        <strong>Timeline</strong>
-        <span v-if="timelineStore.waveformLoading">{{ t('正在生成波形…') }}</span>
+        <span v-if="timelineStore.waveformLoading">{{ t('generating_waveform') }}</span>
         <span v-else-if="timelineStore.waveformError" class="timeline-error">
           {{ timelineStore.waveformError }}
         </span>
-        <span v-else>{{ Math.round(timelineStore.pixelsPerSecond) }} px/s</span>
       </div>
       <div class="timeline-actions">
         <button
@@ -579,7 +694,7 @@ onUnmounted(() => {
           :class="{ active: timelineStore.editMode === 'line' }"
           @click="timelineStore.editMode = 'line'"
         >
-          {{ t('整句移动') }}
+          {{ t('move_line') }}
         </button>
         <button
           type="button"
@@ -590,29 +705,33 @@ onUnmounted(() => {
           :disabled="timelineStore.editMode === 'line'"
           :title="
             timelineStore.adjacentLocked
-              ? t('拖动或快捷键微调时联动相邻 Token；拖动时按 Alt 临时解锁')
-              : t('拖动和快捷键微调都只调整当前 Token')
+              ? t(
+                'link_adjacent_tokens_while_dragging_or_nudging_hold_alt_while_dragging_to_unlock_temporarily'
+              )
+              : t('dragging_and_keyboard_nudging_adjust_only_the_current_token')
           "
           @click="timelineStore.adjacentLocked = !timelineStore.adjacentLocked"
         >
-          {{ timelineStore.adjacentLocked ? `🔒 ${t('相邻锁定')}` : `🔓 ${t('独立调整')}` }}
+          {{
+            timelineStore.adjacentLocked ? `🔒 ${t('adjacent_locked')}` : `🔓 ${t('independent')}`
+          }}
         </button>
         <button
           type="button"
           :class="{ active: timelineStore.followPlayback }"
           :aria-pressed="timelineStore.followPlayback"
-          :title="t('播放游标到达右边界时自动切换到下一段')"
+          :title="t('automatically_advance_when_the_playhead_reaches_the_right_edge')"
           @click="toggleFollow"
         >
-          {{ timelineStore.followPlayback ? `◉ ${t('跟随播放')}` : `○ ${t('跟随关闭')}` }}
+          {{ timelineStore.followPlayback ? `◉ ${t('follow_playback')}` : `○ ${t('follow_off')}` }}
         </button>
         <button
           type="button"
           :disabled="projectStore.activeToken?.start === null || !projectStore.activeToken"
-          :title="t('将选中的 Token 居中并移动播放头')"
+          :title="t('center_the_selected_token_and_move_the_playhead')"
           @click="locateSelectedToken"
         >
-          ◎ {{ t('定位') }}
+          ◎ {{ t('locate') }}
         </button>
         <button
           type="button"
@@ -621,18 +740,18 @@ onUnmounted(() => {
           :aria-pressed="timelineStore.loopEnabled"
           :title="
             timelineStore.loopEnabled
-              ? t('点击退出 Loop；取消选择不会停止循环')
+              ? t('click_to_exit_the_loop_clearing_the_selection_will_not_stop_it')
               : loopRange
-                ? t('循环播放当前 Token')
-                : t('当前 Token 需要有效的起止时间')
+                ? t('loop_the_current_token')
+                : t('the_current_token_needs_valid_start_and_end_times')
           "
           @click="toggleLoop"
         >
-          {{ timelineStore.loopEnabled ? `↻ ${t('Loop 开')}` : '↻ Loop' }}
+          {{ timelineStore.loopEnabled ? `↻ ${t('loop_on')}` : '↻ Loop' }}
         </button>
-        <button type="button" :aria-label="t('缩小时间轴')" @click="zoom(0.8)">−</button>
-        <button type="button" @click="timelineStore.fit(duration())">{{ t('适合窗口') }}</button>
-        <button type="button" :aria-label="t('放大时间轴')" @click="zoom(1.25)">＋</button>
+        <button type="button" :aria-label="t('zoom_out')" @click="zoom(0.8)">−</button>
+        <button type="button" @click="timelineStore.fit(duration())">{{ t('fit') }}</button>
+        <button type="button" :aria-label="t('zoom_in')" @click="zoom(1.25)">＋</button>
       </div>
     </header>
 
@@ -646,7 +765,9 @@ onUnmounted(() => {
         @wheel.prevent="handleWheel"
         @contextmenu.prevent="handleContextMenu"
       />
-      <div v-if="!playerStore.source" class="timeline-empty">{{ t('导入歌曲后显示波形与时间轴') }}</div>
+      <div v-if="!playerStore.source" class="timeline-empty">
+        {{ t('import_audio_to_display_the_waveform_and_timeline') }}
+      </div>
     </div>
     <div
       v-if="contextMenu"
@@ -654,43 +775,61 @@ onUnmounted(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @pointerdown.stop
     >
-      <button type="button" :disabled="contextMenu.tokenIndex === 0" @click="mergeFromMenu(-1)">{{ t('合并前项') }}</button>
+      <button type="button" :disabled="contextMenu.tokenIndex === 0" @click="mergeFromMenu(-1)">
+        {{ t('merge_previous') }}
+      </button>
       <button
         type="button"
-        :disabled="contextMenu.tokenIndex >= (projectStore.project.lines[contextMenu.lineIndex]?.tokens.length ?? 0) - 1"
+        :disabled="
+          contextMenu.tokenIndex >=
+            (projectStore.project.lines[contextMenu.lineIndex]?.tokens.length ?? 0) - 1
+        "
         @click="mergeFromMenu(1)"
       >
-        {{ t('合并后项') }}
+        {{ t('merge_next') }}
       </button>
       <button type="button" :disabled="!canMergeSelection" @click="mergeSelectionFromMenu">
-        {{ t('合并选中项') }}
+        {{ t('merge_selection') }}
       </button>
-      <button type="button" @click="openTokenStructureDialog('split')">{{ t('拆分 Token') }}</button>
+      <button type="button" @click="openTokenStructureDialog('split')">
+        {{ t('split_token') }}
+      </button>
       <hr />
       <button type="button" @click="openTokenStructureDialog('insert-before')">
-        {{ t('在前面插入 Token') }}
+        {{ t('insert_token_before') }}
       </button>
       <button type="button" @click="openTokenStructureDialog('insert-after')">
-        {{ t('在后面插入 Token') }}
+        {{ t('insert_token_after') }}
       </button>
       <hr />
       <button type="button" class="danger" @click="deleteSelectedTokens">
-        {{ timelineStore.selectedTokenIds.length > 1 ? t('删除选中 Token') : t('删除 Token') }}
+        {{
+          timelineStore.selectedTokenIds.length > 1
+            ? t('delete_selected_tokens')
+            : t('delete_token')
+        }}
       </button>
     </div>
     <footer class="timeline-footer">
       <p class="timeline-help">
         {{
-          timelineStore.followPlayback
-            ? t('跟随播放已开启 · 到达可视区末端时自动切换下一段')
-            : timelineStore.editMode === 'line'
-              ? t('整句移动模式 · Shift + 拖动平移时间轴')
-              : timelineStore.adjacentLocked
-                ? t('相邻已锁定：拖动和快捷键会联动前后 Token · Alt 临时解锁拖动')
-                : t('独立调整：拖动和快捷键只修改当前 Token · Shift + 拖动平移时间轴')
+          timelineStore.selectedTokenIds.length > 1
+            ? t(
+              'multi_select_drag_to_move_together_hold_alt_option_while_dragging_to_resize_durations'
+            )
+            : timelineStore.followPlayback
+              ? t('following_playback_advances_when_the_playhead_reaches_the_visible_edge')
+              : timelineStore.editMode === 'line'
+                ? t('move_line_mode_shift_drag_to_pan_the_timeline')
+                : timelineStore.adjacentLocked
+                  ? t(
+                    'adjacent_lock_on_edits_link_neighboring_tokens_hold_alt_to_unlock_while_dragging'
+                  )
+                  : t('independent_editing_only_the_current_token_changes_shift_drag_to_pan')
         }}
       </p>
-      <label class="timeline-zoom-control" :title="t('拖动调节时间线缩放尺度')">
+      <label class="timeline-zoom-control" :title="t('drag_to_adjust_timeline_zoom')">
+        <output>{{ Math.round(timelineStore.pixelsPerSecond) }} px/s</output>
         <span aria-hidden="true">−</span>
         <input
           type="range"
@@ -698,11 +837,10 @@ onUnmounted(() => {
           max="100"
           step="0.5"
           :value="zoomLevel"
-          :aria-label="t('时间线缩放尺度')"
+          :aria-label="t('timeline_zoom')"
           @input="setZoomLevel"
         />
         <span aria-hidden="true">＋</span>
-        <output>{{ Math.round(timelineStore.pixelsPerSecond) }} px/s</output>
       </label>
     </footer>
   </section>

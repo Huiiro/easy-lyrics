@@ -2,69 +2,185 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 export const shortcutActions = [
-  { id: 'openProject', group: '工程', label: '打开工程', description: '打开已有工程文件' },
-  { id: 'saveProject', group: '工程', label: '保存工程', description: '保存当前工程' },
-  { id: 'importLyrics', group: '工程', label: '导入 / 编辑歌词', description: '打开歌词编辑窗口' },
-  { id: 'exportLyrics', group: '工程', label: '导出歌词', description: '打开歌词导出窗口' },
-  { id: 'selectAudio', group: '工程', label: '选择音频', description: '选择或更换音频文件' },
-  { id: 'undo', group: '编辑', label: '撤销', description: '撤销上一次修改' },
-  { id: 'redo', group: '编辑', label: '重做', description: '恢复上一次撤销' },
-  { id: 'playPause', group: '播放', label: '播放 / 暂停', description: '切换当前音频的播放状态' },
+  {
+    id: 'openProject',
+    group: 'project',
+    label: 'open_project',
+    description: 'open_an_existing_project_file'
+  },
+  {
+    id: 'saveProject',
+    group: 'project',
+    label: 'save_project',
+    description: 'save_the_current_project'
+  },
+  {
+    id: 'importLyrics',
+    group: 'project',
+    label: 'import_edit_lyrics',
+    description: 'open_the_lyrics_editor'
+  },
+  {
+    id: 'exportLyrics',
+    group: 'project',
+    label: 'export_lyrics',
+    description: 'open_the_lyrics_export_dialog'
+  },
+  {
+    id: 'selectAudio',
+    group: 'project',
+    label: 'select_audio',
+    description: 'select_or_replace_the_audio_file'
+  },
+  { id: 'undo', group: 'edit', label: 'undo', description: 'undo_the_last_change' },
+  { id: 'redo', group: 'edit', label: 'redo', description: 'redo_the_last_undone_change' },
+  { id: 'playPause', group: 'play', label: 'play_pause', description: 'toggle_audio_playback' },
   {
     id: 'markToken',
-    group: '打轴',
-    label: '记录当前 Token',
-    description: '在当前播放位置写入时间点'
+    group: 'timing',
+    label: 'mark_current_token',
+    description: 'set_timing_at_the_current_playhead'
   },
   {
     id: 'previousToken',
-    group: '导航',
-    label: '上一个 Token',
-    description: '将选择移动到上一个 Token'
+    group: 'navigation',
+    label: 'previous_token',
+    description: 'select_the_previous_token'
   },
   {
     id: 'nextToken',
-    group: '导航',
-    label: '下一个 Token',
-    description: '将选择移动到下一个 Token'
+    group: 'navigation',
+    label: 'next_token',
+    description: 'select_the_next_token'
   },
-  { id: 'previousLine', group: '导航', label: '上一句', description: '跳转到上一句歌词' },
-  { id: 'nextLine', group: '导航', label: '下一句', description: '跳转到下一句歌词' },
+  {
+    id: 'previousLine',
+    group: 'navigation',
+    label: 'previous_line',
+    description: 'go_to_the_previous_lyric_line'
+  },
+  {
+    id: 'nextLine',
+    group: 'navigation',
+    label: 'next_line',
+    description: 'go_to_the_next_lyric_line'
+  },
   {
     id: 'nudgeEarlierFine',
-    group: '编辑',
-    label: '向前微调 1 ms',
-    description: '向前移动当前选区'
+    group: 'edit',
+    label: 'nudge_earlier_1_ms',
+    description: 'move_the_selection_earlier'
   },
-  { id: 'nudgeLaterFine', group: '编辑', label: '向后微调 1 ms', description: '向后移动当前选区' },
+  {
+    id: 'nudgeLaterFine',
+    group: 'edit',
+    label: 'nudge_later_1_ms',
+    description: 'move_the_selection_later'
+  },
   {
     id: 'nudgeEarlierCoarse',
-    group: '编辑',
-    label: '向前微调 50 ms',
-    description: '大步向前移动当前选区'
+    group: 'edit',
+    label: 'nudge_earlier_50_ms',
+    description: 'move_the_selection_earlier_by_a_larger_step'
   },
   {
     id: 'nudgeLaterCoarse',
-    group: '编辑',
-    label: '向后微调 50 ms',
-    description: '大步向后移动当前选区'
+    group: 'edit',
+    label: 'nudge_later_50_ms',
+    description: 'move_the_selection_later_by_a_larger_step'
   },
-  { id: 'locateToken', group: '导航', label: '定位选中 Token', description: '将选中 Token 居中并移动播放头' },
-  { id: 'toggleLoop', group: '播放', label: '切换 Token Loop', description: '开启或退出当前 Token 循环' },
-  { id: 'toggleLyricsFollow', group: '播放', label: '切换歌词跟随', description: '控制左侧歌词自动跟随播放' },
-  { id: 'toggleTimelineFollow', group: '播放', label: '切换时间轴跟随', description: '控制时间轴自动跟随播放头' },
-  { id: 'copyLineTiming', group: '编辑', label: '复制整句时间', description: '复制当前句的 Token 时间结构' },
-  { id: 'pasteLineTiming', group: '编辑', label: '粘贴整句时间', description: '在播放头位置粘贴时间结构' },
-  { id: 'automaticTiming', group: '打轴', label: '智能打轴', description: '根据音频时长生成初始时间' },
-  { id: 'focusTokenSplit', group: 'Token', label: '拆分 Token', description: '聚焦 Token 拆分输入框' },
-  { id: 'mergePreviousToken', group: 'Token', label: '合并前一个 Token', description: '将当前 Token 与前项合并' },
-  { id: 'mergeNextToken', group: 'Token', label: '合并后一个 Token', description: '将当前 Token 与后项合并' },
-  { id: 'tokenEditMode', group: '时间轴', label: 'Token 编辑模式', description: '切换为单 Token 编辑' },
-  { id: 'lineEditMode', group: '时间轴', label: '整句编辑模式', description: '切换为整句移动' },
-  { id: 'toggleAdjacentLock', group: '时间轴', label: '切换相邻锁定', description: '控制 Token 边界联动' },
-  { id: 'zoomOut', group: '时间轴', label: '缩小时间轴', description: '降低时间轴缩放比例' },
-  { id: 'zoomIn', group: '时间轴', label: '放大时间轴', description: '提高时间轴缩放比例' },
-  { id: 'fitTimeline', group: '时间轴', label: '适合窗口', description: '显示完整音频时间范围' }
+  {
+    id: 'locateToken',
+    group: 'navigation',
+    label: 'locate_selected_token',
+    description: 'center_the_selected_token_and_move_the_playhead'
+  },
+  {
+    id: 'toggleLoop',
+    group: 'play',
+    label: 'toggle_token_loop',
+    description: 'enable_or_disable_looping_the_current_token'
+  },
+  {
+    id: 'toggleLyricsFollow',
+    group: 'play',
+    label: 'toggle_lyrics_follow',
+    description: 'control_automatic_lyric_scrolling'
+  },
+  {
+    id: 'toggleTimelineFollow',
+    group: 'play',
+    label: 'toggle_timeline_follow',
+    description: 'control_whether_the_timeline_follows_the_playhead'
+  },
+  {
+    id: 'copyLineTiming',
+    group: 'edit',
+    label: 'copy_line_timing',
+    description: 'copy_token_timing_from_the_current_line'
+  },
+  {
+    id: 'pasteLineTiming',
+    group: 'edit',
+    label: 'paste_line_timing',
+    description: 'paste_timing_at_the_playhead'
+  },
+  {
+    id: 'preprocessLyrics',
+    group: 'edit',
+    label: 'lyrics_preprocessing',
+    description: 'clean_lyrics_with_rules_or_regular_expressions'
+  },
+  {
+    id: 'automaticTiming',
+    group: 'timing',
+    label: 'auto_timing',
+    description: 'generate_initial_timing_from_the_audio_duration'
+  },
+  {
+    id: 'focusTokenSplit',
+    group: 'token',
+    label: 'split_token',
+    description: 'focus_the_token_split_field'
+  },
+  {
+    id: 'mergePreviousToken',
+    group: 'token',
+    label: 'merge_previous_token',
+    description: 'merge_the_current_token_with_the_previous_one'
+  },
+  {
+    id: 'mergeNextToken',
+    group: 'token',
+    label: 'merge_next_token',
+    description: 'merge_the_current_token_with_the_next_one'
+  },
+  {
+    id: 'tokenEditMode',
+    group: 'timeline',
+    label: 'token_edit_mode',
+    description: 'switch_to_single_token_editing'
+  },
+  {
+    id: 'lineEditMode',
+    group: 'timeline',
+    label: 'line_edit_mode',
+    description: 'switch_to_moving_an_entire_line'
+  },
+  {
+    id: 'toggleAdjacentLock',
+    group: 'timeline',
+    label: 'toggle_adjacent_lock',
+    description: 'control_linked_token_boundaries'
+  },
+  { id: 'zoomOut', group: 'timeline', label: 'zoom_out', description: 'decrease_timeline_zoom' },
+  { id: 'zoomIn', group: 'timeline', label: 'zoom_in', description: 'increase_timeline_zoom' },
+  {
+    id: 'fitTimeline',
+    group: 'timeline',
+    label: 'fit',
+    description: 'show_the_full_audio_time_range'
+  }
 ] as const
 
 export type ShortcutAction = (typeof shortcutActions)[number]['id']
@@ -94,6 +210,7 @@ export const defaultShortcutBindings: ShortcutBindings = {
   toggleTimelineFollow: 'T',
   copyLineTiming: 'Alt+C',
   pasteLineTiming: 'Alt+V',
+  preprocessLyrics: 'Alt+P',
   automaticTiming: 'Alt+A',
   focusTokenSplit: 'S',
   mergePreviousToken: '[',
@@ -108,15 +225,39 @@ export const defaultShortcutBindings: ShortcutBindings = {
 
 const storageKey = 'lyric-timeline.settings.v1'
 
-function loadBindings(): ShortcutBindings {
-  if (typeof localStorage === 'undefined') return { ...defaultShortcutBindings }
+interface StoredSettings {
+  shortcuts: ShortcutBindings
+  autosaveEnabled: boolean
+  autosaveIntervalMs: number
+}
+
+export const DEFAULT_AUTOSAVE_INTERVAL_MS = 60_000
+
+function loadSettings(): StoredSettings {
+  const defaults: StoredSettings = {
+    shortcuts: { ...defaultShortcutBindings },
+    autosaveEnabled: true,
+    autosaveIntervalMs: DEFAULT_AUTOSAVE_INTERVAL_MS
+  }
+  if (typeof localStorage === 'undefined') return defaults
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as {
       shortcuts?: Partial<ShortcutBindings>
+      autosaveEnabled?: unknown
+      autosaveIntervalMs?: unknown
     }
-    return { ...defaultShortcutBindings, ...value.shortcuts }
+    return {
+      shortcuts: { ...defaultShortcutBindings, ...value.shortcuts },
+      autosaveEnabled: typeof value.autosaveEnabled === 'boolean' ? value.autosaveEnabled : true,
+      autosaveIntervalMs:
+        typeof value.autosaveIntervalMs === 'number' &&
+        Number.isFinite(value.autosaveIntervalMs) &&
+        value.autosaveIntervalMs >= 10_000
+          ? value.autosaveIntervalMs
+          : DEFAULT_AUTOSAVE_INTERVAL_MS
+    }
   } catch {
-    return { ...defaultShortcutBindings }
+    return defaults
   }
 }
 
@@ -137,8 +278,23 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean
   return shortcutFromEvent(event) === shortcut
 }
 
+export function formatShortcut(shortcut: string, mac = false): string {
+  return shortcut
+    .replace('Mod', mac ? '⌘' : 'Ctrl')
+    .replace('Alt', mac ? '⌥' : 'Alt')
+    .replace('Shift', mac ? '⇧' : 'Shift')
+    .replaceAll('+', mac ? ' ' : ' + ')
+    .replace('ArrowLeft', '←')
+    .replace('ArrowRight', '→')
+    .replace('ArrowUp', '↑')
+    .replace('ArrowDown', '↓')
+}
+
 export const useSettingsStore = defineStore('settings', () => {
-  const shortcuts = ref<ShortcutBindings>(loadBindings())
+  const stored = loadSettings()
+  const shortcuts = ref<ShortcutBindings>(stored.shortcuts)
+  const autosaveEnabled = ref(stored.autosaveEnabled)
+  const autosaveIntervalMs = ref(stored.autosaveIntervalMs)
   const theme = ref<'dark' | 'light'>('dark')
   const conflicts = computed(() => {
     const counts = Object.values(shortcuts.value).reduce<Record<string, number>>(
@@ -159,15 +315,37 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcuts.value = { ...defaultShortcutBindings }
   }
 
+  function setAutosave(value: { enabled: boolean; intervalMs: number }): void {
+    autosaveEnabled.value = value.enabled
+    autosaveIntervalMs.value = value.intervalMs
+  }
+
   watch(
-    shortcuts,
-    (value) => {
+    [shortcuts, autosaveEnabled, autosaveIntervalMs],
+    ([bindings, enabled, intervalMs]) => {
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(storageKey, JSON.stringify({ shortcuts: value }))
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            shortcuts: bindings,
+            autosaveEnabled: enabled,
+            autosaveIntervalMs: intervalMs
+          })
+        )
       }
+      window.desktopApi?.setShortcuts({ ...bindings })
     },
-    { deep: true }
+    { deep: true, immediate: true }
   )
 
-  return { shortcuts, theme, conflicts, setShortcuts, resetShortcuts }
+  return {
+    shortcuts,
+    theme,
+    autosaveEnabled,
+    autosaveIntervalMs,
+    conflicts,
+    setShortcuts,
+    resetShortcuts,
+    setAutosave
+  }
 })

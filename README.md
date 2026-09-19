@@ -30,6 +30,23 @@ npm test
 npm run build
 ```
 
+## 打包与发布
+
+electron-builder 会生成当前平台的安装包：
+
+```bash
+npm run dist
+```
+
+也可以显式选择目标平台：`npm run dist:win`、`npm run dist:mac` 或
+`npm run dist:linux`。安装包输出到 `dist/`。Windows 安装器会注册
+`lyric-timeline://` URL 协议，播放器可通过该协议唤起歌词工具。
+
+GitHub Actions 会在推送和拉取请求时运行类型检查、Lint、测试与三平台打包。
+推送与 `package.json` 版本一致的 `v*` 标签（例如 `v0.5.0`）时，会自动创建
+GitHub Release 并上传各平台安装包。当前构建未配置代码签名；正式分发时可再接入
+Windows 代码签名证书和 Apple Developer 证书。
+
 ## 目录
 
 ```text

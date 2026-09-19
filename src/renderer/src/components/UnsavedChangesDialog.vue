@@ -17,27 +17,27 @@ const { t } = useI18n()
     <div class="unsaved-changes-dialog">
       <header class="dialog-header">
         <div>
-          <p class="eyebrow">{{ t('未保存的修改') }}</p>
-          <h2 id="unsaved-changes-title">{{ t('是否保存当前工程？') }}</h2>
+          <p class="eyebrow">{{ t('unsaved_changes') }}</p>
+          <h2 id="unsaved-changes-title">{{ t('save_the_current_project_alternate') }}</h2>
         </div>
       </header>
       <p>
         {{
-          t('“{name}”包含尚未保存的修改。保存后再继续，可以避免丢失这些修改。', {
+          t('name_has_unsaved_changes_save_before_continuing_to_avoid_losing_them', {
             name: projectName
           })
         }}
       </p>
       <footer class="dialog-footer">
         <button class="secondary-button" type="button" :disabled="saving" @click="emit('discard')">
-          {{ t('不保存') }}
+          {{ t('dont_save') }}
         </button>
         <div>
           <button class="secondary-button" type="button" :disabled="saving" @click="emit('cancel')">
-            {{ t('取消') }}
+            {{ t('cancel') }}
           </button>
           <button class="primary-button" type="button" :disabled="saving" @click="emit('save')">
-            {{ saving ? t('正在保存…') : t('保存') }}
+            {{ saving ? t('saving') : t('save') }}
           </button>
         </div>
       </footer>

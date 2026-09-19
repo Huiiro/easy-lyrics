@@ -1,6 +1,7 @@
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { access, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 
 import {
   app,
@@ -16,21 +17,28 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 
 import { createAudioResponse } from './audio-response'
 import { IPC_CHANNELS } from '../shared/ipc'
-import type { RecentProject } from '../shared/ipc'
+import type { RecentProject, SaveHistoryEntry, WindowLaunchPayload } from '../shared/ipc'
 import { parseProjectFile } from '../shared/project-file'
 import type { LyricProject } from '../shared/models/project'
 import { parseExportTemplates, type ExportTemplate } from '../shared/export'
 import { parseRecentProjects, prioritizeRecentProject } from '../shared/recent-projects'
+import { addSaveHistoryEntry, parseSaveHistory } from '../shared/save-history'
 import {
   LYRIC_TIMELINE_PROTOCOL,
   parsePlayerSongPayload,
   payloadPathFromUrl
 } from '../shared/integration'
 import type { IntegrationOpenResult } from '../shared/ipc'
+import enUS from '../shared/i18n/locales/en-US'
+import zhCN from '../shared/i18n/locales/zh-CN'
 
 const audioFiles = new Map<string, string>()
-let projectDirty = false
+const dirtyWindows = new Map<number, boolean>()
+const claimedAutosaves = new Map<number, string>()
+const windowLaunchPayloads = new Map<number, WindowLaunchPayload>()
+let saveHistoryQueue = Promise.resolve()
 let pendingIntegration: IntegrationOpenResult | null = null
+let menuShortcuts: Record<string, string> = {}
 let currentLocale: 'zh-CN' | 'en-US' = Intl.DateTimeFormat()
   .resolvedOptions()
   .locale.toLowerCase()
@@ -38,70 +46,10 @@ let currentLocale: 'zh-CN' | 'en-US' = Intl.DateTimeFormat()
   ? 'zh-CN'
   : 'en-US'
 
-const mainEnglish: Record<string, string> = {
-  导出歌词: 'Export Lyrics',
-  文件: 'File',
-  音频文件: 'Audio Files',
-  所有文件: 'All Files',
-  选择音频: 'Select Audio',
-  保存工程: 'Save Project',
-  打开工程: 'Open Project',
-  未保存的修改: 'Unsaved Changes',
-  '当前工程有未保存的修改。': 'The current project has unsaved changes.',
-  '自动恢复副本已保留，但建议先保存工程。':
-    'An autosave is available, but saving the project is recommended.',
-  取消关闭: 'Cancel',
-  仍然关闭: 'Close Anyway',
-  新建: 'New',
-  '打开项目…': 'Open Project…',
-  最近项目: 'Recent Projects',
-  暂无最近项目: 'No Recent Projects',
-  '重命名项目…': 'Rename Project…',
-  关闭项目: 'Close Project',
-  保存: 'Save',
-  查看保存记录: 'View Save History',
-  '导入歌曲…': 'Import Audio…',
-  '导入歌词…': 'Import Lyrics…',
-  '导出…': 'Export…',
-  编辑: 'Edit',
-  撤销: 'Undo',
-  重做: 'Redo',
-  播放与打轴: 'Playback & Timing',
-  '播放 / 暂停': 'Play / Pause',
-  '记录当前 Token': 'Mark Current Token',
-  智能打轴: 'Auto Timing',
-  '切换 Loop': 'Toggle Loop',
-  切换歌词跟随: 'Toggle Lyrics Follow',
-  切换时间轴跟随: 'Toggle Timeline Follow',
-  导航与微调: 'Navigation & Nudge',
-  '上一个 Token': 'Previous Token',
-  '下一个 Token': 'Next Token',
-  上一句: 'Previous Line',
-  下一句: 'Next Line',
-  '定位选中 Token': 'Locate Selected Token',
-  '向前微调 1 ms': 'Nudge Earlier 1 ms',
-  '向后微调 1 ms': 'Nudge Later 1 ms',
-  '向前微调 50 ms': 'Nudge Earlier 50 ms',
-  '向后微调 50 ms': 'Nudge Later 50 ms',
-  '复制与 Token 结构': 'Copy & Token Structure',
-  复制整句时间: 'Copy Line Timing',
-  粘贴整句时间: 'Paste Line Timing',
-  '拆分 Token': 'Split Token',
-  '合并前一个 Token': 'Merge Previous Token',
-  '合并下一个 Token': 'Merge Next Token',
-  时间轴: 'Timeline',
-  'Token 编辑模式': 'Token Edit Mode',
-  整句编辑模式: 'Line Edit Mode',
-  切换相邻锁定: 'Toggle Adjacent Lock',
-  缩小时间轴: 'Zoom Out',
-  放大时间轴: 'Zoom In',
-  适合时间轴: 'Fit Timeline',
-  '快捷键与设置…': 'Shortcuts & Settings…',
-  文件后缀: 'Files'
-}
+const mainMessages = { 'zh-CN': zhCN, 'en-US': enUS }
 
-function mt(value: string): string {
-  return currentLocale === 'en-US' ? (mainEnglish[value] ?? value) : value
+function mt(key: string): string {
+  return mainMessages[currentLocale][key] ?? key
 }
 
 function recentProjectsPath(): string {
@@ -110,6 +58,85 @@ function recentProjectsPath(): string {
 
 function exportTemplatesPath(): string {
   return join(app.getPath('userData'), 'export-presets.json')
+}
+
+function autosavesPath(): string {
+  return join(app.getPath('userData'), 'autosaves')
+}
+
+function autosavePrefix(projectId: string): string {
+  return createHash('sha256').update(projectId).digest('hex')
+}
+
+function autosavePath(projectId: string, windowSessionId: string): string {
+  const sessionKey = createHash('sha256').update(windowSessionId).digest('hex')
+  return join(autosavesPath(), `${autosavePrefix(projectId)}-${sessionKey}.lyricproj`)
+}
+
+async function clearWindowAutosave(
+  projectId: string,
+  windowSessionId: string,
+  webContentsId: number
+): Promise<void> {
+  const paths = [
+    autosavePath(projectId, windowSessionId),
+    claimedAutosaves.get(webContentsId)
+  ].filter((path): path is string => Boolean(path))
+  await Promise.all(paths.map((path) => unlink(path).catch(() => undefined)))
+  claimedAutosaves.delete(webContentsId)
+}
+
+function saveHistoryPath(): string {
+  return join(app.getPath('userData'), 'save-history.json')
+}
+
+function saveArchivesPath(projectId: string): string {
+  return join(app.getPath('userData'), 'save-archives', autosavePrefix(projectId))
+}
+
+function saveArchivePath(projectId: string, entryId: string): string {
+  const entryKey = createHash('sha256').update(entryId).digest('hex')
+  return join(saveArchivesPath(projectId), `${entryKey}.lyricproj`)
+}
+
+async function readSaveHistory(): Promise<SaveHistoryEntry[]> {
+  try {
+    return parseSaveHistory(JSON.parse(await readFile(saveHistoryPath(), 'utf8')))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      console.warn('Unable to read save history', error)
+    return []
+  }
+}
+
+async function recordSave(project: LyricProject, path: string): Promise<void> {
+  const operation = saveHistoryQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const entry: SaveHistoryEntry = {
+        id: crypto.randomUUID(),
+        projectId: project.id,
+        projectName: project.name,
+        path,
+        savedAt: Date.now(),
+        archiveAvailable: true
+      }
+      await mkdir(saveArchivesPath(project.id), { recursive: true })
+      await atomicWrite(saveArchivePath(project.id, entry.id), project)
+      const previous = await readSaveHistory()
+      const next = addSaveHistoryEntry(previous, entry)
+      const temporaryPath = `${saveHistoryPath()}.${crypto.randomUUID()}.tmp`
+      await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+      await rename(temporaryPath, saveHistoryPath())
+      const retainedIds = new Set(next.map((item) => item.id))
+      await Promise.all(
+        previous
+          .filter((item) => item.archiveAvailable && !retainedIds.has(item.id))
+          .map((item) => unlink(saveArchivePath(item.projectId, item.id)).catch(() => undefined))
+      )
+    })
+  saveHistoryQueue = operation
+  await operation
 }
 
 async function writeRecentProjects(projects: RecentProject[]): Promise<void> {
@@ -154,12 +181,16 @@ async function rememberProject(path: string, name: string): Promise<void> {
   )
   const window = BrowserWindow.getAllWindows()[0]
   if (process.platform === 'darwin' && window) void installMacMenu(window)
+  for (const target of BrowserWindow.getAllWindows())
+    target.webContents.send(IPC_CHANNELS.recentProjectsChanged)
 }
 
 async function forgetProject(path: string): Promise<void> {
   await writeRecentProjects((await listRecentProjects()).filter((project) => project.path !== path))
   const window = BrowserWindow.getAllWindows()[0]
   if (process.platform === 'darwin' && window) void installMacMenu(window)
+  for (const target of BrowserWindow.getAllWindows())
+    target.webContents.send(IPC_CHANNELS.recentProjectsChanged)
 }
 
 async function openRecentProject(path: string) {
@@ -196,7 +227,7 @@ async function readProject(path: string, exposedPath: string | null = path) {
 
 async function atomicWrite(path: string, project: LyricProject): Promise<void> {
   const validated = parseProjectFile(project)
-  const temporaryPath = `${path}.tmp`
+  const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`
   await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, 'utf8')
   await rename(temporaryPath, path)
 }
@@ -216,6 +247,12 @@ protocol.registerSchemesAsPrivileged([
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
+  ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
+  ipcMain.on(IPC_CHANNELS.setShortcuts, (_event, shortcuts: Record<string, string>) => {
+    menuShortcuts = { ...shortcuts }
+    const window = BrowserWindow.getAllWindows()[0]
+    if (process.platform === 'darwin' && window) void installMacMenu(window)
+  })
   ipcMain.handle(IPC_CHANNELS.integrationTakePending, () => {
     const request = pendingIntegration
     pendingIntegration = null
@@ -248,10 +285,10 @@ function registerIpcHandlers(): void {
     async (_event, content: string, extension: string, projectName: string) => {
       const safeExtension = extension.replace(/[^a-zA-Z0-9]/g, '') || 'txt'
       const result = await dialog.showSaveDialog({
-        title: mt('导出歌词'),
+        title: mt('export_lyrics'),
         defaultPath: `${projectName || 'lyrics'}.${safeExtension}`,
         filters: [
-          { name: `${safeExtension.toUpperCase()} ${mt('文件后缀')}`, extensions: [safeExtension] }
+          { name: `${safeExtension.toUpperCase()} ${mt('files')}`, extensions: [safeExtension] }
         ]
       })
       if (!result.filePath) return null
@@ -264,11 +301,14 @@ function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC_CHANNELS.selectAudio, async () => {
     const result = await dialog.showOpenDialog({
-      title: mt('选择音频'),
+      title: mt('select_audio'),
       properties: ['openFile'],
       filters: [
-        { name: mt('音频文件'), extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus'] },
-        { name: mt('所有文件'), extensions: ['*'] }
+        {
+          name: mt('audio_files'),
+          extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus']
+        },
+        { name: mt('all_files'), extensions: ['*'] }
       ]
     })
 
@@ -280,12 +320,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.registerAudio, (_event, path: string) => registerAudio(path))
   ipcMain.handle(
     IPC_CHANNELS.saveProject,
-    async (_event, project: LyricProject, existingPath?: string) => {
+    async (
+      event,
+      project: LyricProject,
+      existingPath: string | undefined,
+      windowSessionId: string
+    ) => {
       let path = existingPath
       if (!path) {
         const result = await dialog.showSaveDialog({
-          title: mt('保存工程'),
-          defaultPath: `${project.name || 'Untitled Project'}.lyricproj`,
+          title: mt('save_project'),
+          defaultPath: `${project.name || 'untitled_project'}.lyricproj`,
           filters: [{ name: 'Lyric Timeline 工程', extensions: ['lyricproj'] }]
         })
         path = result.filePath
@@ -293,48 +338,129 @@ function registerIpcHandlers(): void {
       if (!path) return null
       if (!path.endsWith('.lyricproj')) path += '.lyricproj'
       await atomicWrite(path, project)
-      await unlink(join(app.getPath('userData'), 'autosave.lyricproj')).catch(() => undefined)
+      await clearWindowAutosave(project.id, windowSessionId, event.sender.id)
+      await recordSave(project, path)
       await rememberProject(path, project.name)
       return { path, project, audio: null, audioMissing: false }
     }
   )
-  ipcMain.handle(IPC_CHANNELS.openProject, async () => {
-    const result = await dialog.showOpenDialog({
-      title: mt('打开工程'),
+  ipcMain.handle(IPC_CHANNELS.openProject, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: mt('open_project'),
       properties: ['openFile'],
       filters: [{ name: 'Lyric Timeline 工程', extensions: ['lyricproj'] }]
-    })
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
     const path = result.filePaths[0]
     if (result.canceled || !path) return null
     const project = await readProject(path)
     await rememberProject(path, project.project.name)
     return project
   })
-  ipcMain.handle(IPC_CHANNELS.autosaveProject, async (_event, project: LyricProject) => {
-    await atomicWrite(join(app.getPath('userData'), 'autosave.lyricproj'), project)
-  })
-  ipcMain.handle(IPC_CHANNELS.loadAutosave, async () => {
-    const path = join(app.getPath('userData'), 'autosave.lyricproj')
+  ipcMain.handle(
+    IPC_CHANNELS.autosaveProject,
+    async (_event, project: LyricProject, windowSessionId: string) => {
+      await mkdir(autosavesPath(), { recursive: true })
+      await atomicWrite(autosavePath(project.id, windowSessionId), project)
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.loadAutosave, async (event) => {
     try {
-      return await readProject(path, null)
+      await mkdir(autosavesPath(), { recursive: true })
+      const candidates = (await readdir(autosavesPath()))
+        .filter((name) => name.endsWith('.lyricproj'))
+        .map((name) => join(autosavesPath(), name))
+        .filter((path) => !new Set(claimedAutosaves.values()).has(path))
+      const legacyPath = join(app.getPath('userData'), 'autosave.lyricproj')
+      try {
+        await access(legacyPath)
+        if (![...claimedAutosaves.values()].includes(legacyPath)) candidates.push(legacyPath)
+      } catch {
+        // No legacy autosave exists.
+      }
+      const dated = await Promise.all(
+        candidates.map(async (path) => ({ path, time: (await stat(path)).mtimeMs }))
+      )
+      dated.sort((left, right) => right.time - left.time)
+      if (!dated[0]) return null
+      const result = await readProject(dated[0].path, null)
+      claimedAutosaves.set(event.sender.id, dated[0].path)
+      return result
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw error
     }
   })
+  ipcMain.handle(
+    IPC_CHANNELS.clearAutosave,
+    async (event, projectId: string, windowSessionId: string) =>
+      clearWindowAutosave(projectId, windowSessionId, event.sender.id)
+  )
+  ipcMain.handle(IPC_CHANNELS.listSaveHistory, async (_event, projectId: string) =>
+    (await readSaveHistory()).filter((entry) => entry.projectId === projectId)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.loadSaveHistoryEntry,
+    async (_event, projectId: string, entryId: string) => {
+      const entry = (await readSaveHistory()).find(
+        (item) => item.id === entryId && item.projectId === projectId && item.archiveAvailable
+      )
+      if (!entry) return null
+      try {
+        return await readProject(saveArchivePath(projectId, entryId), null)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.listRecentProjects, () => listRecentProjects())
   ipcMain.handle(IPC_CHANNELS.openRecentProject, (_event, path: string) => openRecentProject(path))
   ipcMain.handle(IPC_CHANNELS.loadLastProject, async () => {
     const [latest] = await listRecentProjects()
     return latest ? openRecentProject(latest.path) : null
   })
+  ipcMain.handle(IPC_CHANNELS.createProjectWindow, () => {
+    createWindow({ type: 'new' })
+  })
+  ipcMain.handle(IPC_CHANNELS.openProjectInNewWindow, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: mt('open_project'),
+      properties: ['openFile'],
+      filters: [{ name: 'Lyric Timeline 工程', extensions: ['lyricproj'] }]
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return false
+    const project = await readProject(path)
+    await rememberProject(path, project.project.name)
+    createWindow({ type: 'project', result: project })
+    return true
+  })
+  ipcMain.handle(IPC_CHANNELS.openRecentProjectInNewWindow, async (_event, path: string) => {
+    const project = await openRecentProject(path)
+    if (!project) return false
+    createWindow({ type: 'project', result: project })
+    return true
+  })
+  ipcMain.handle(IPC_CHANNELS.takeWindowLaunch, (event) => {
+    const payload = windowLaunchPayloads.get(event.sender.id) ?? null
+    windowLaunchPayloads.delete(event.sender.id)
+    return payload
+  })
   ipcMain.on(IPC_CHANNELS.setProjectDirty, (_event, dirty: boolean) => {
-    projectDirty = dirty
+    dirtyWindows.set(_event.sender.id, dirty)
   })
   ipcMain.on(IPC_CHANNELS.confirmAppClose, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) return
-    projectDirty = false
+    dirtyWindows.set(event.sender.id, false)
     window.close()
   })
 }
@@ -375,7 +501,7 @@ function integrationUrlFromArgs(args: string[]): string | undefined {
   return args.find((arg) => arg.startsWith(`${LYRIC_TIMELINE_PROTOCOL}://`))
 }
 
-function createWindow(): void {
+function createWindow(launchPayload?: WindowLaunchPayload): BrowserWindow {
   const isMac = process.platform === 'darwin'
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -395,14 +521,20 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+  if (launchPayload) windowLaunchPayloads.set(mainWindow.webContents.id, launchPayload)
 
   if (isMac) void installMacMenu(mainWindow)
 
   mainWindow.once('ready-to-show', () => mainWindow.show())
   mainWindow.on('close', (event) => {
-    if (!projectDirty) return
+    if (!dirtyWindows.get(mainWindow.webContents.id)) return
     event.preventDefault()
     mainWindow.webContents.send(IPC_CHANNELS.requestAppClose)
+  })
+  mainWindow.webContents.on('destroyed', () => {
+    dirtyWindows.delete(mainWindow.webContents.id)
+    claimedAutosaves.delete(mainWindow.webContents.id)
+    windowLaunchPayloads.delete(mainWindow.webContents.id)
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -414,102 +546,142 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return mainWindow
 }
 
 function sendMenuAction(window: BrowserWindow, action: string): void {
-  window.webContents.send(IPC_CHANNELS.menuAction, action)
+  const target = BrowserWindow.getFocusedWindow() ?? window
+  target.webContents.send(IPC_CHANNELS.menuAction, action)
 }
 
 async function installMacMenu(window: BrowserWindow): Promise<void> {
   const recent = await listRecentProjects()
+  const accelerator = (action: string): string | undefined => {
+    const value = menuShortcuts[action]
+    if (!value) return undefined
+    return value
+      .replace('Mod', 'CmdOrCtrl')
+      .replace('ArrowLeft', 'Left')
+      .replace('ArrowRight', 'Right')
+      .replace('ArrowUp', 'Up')
+      .replace('ArrowDown', 'Down')
+  }
   const command = (action: string): MenuItemConstructorOptions => ({
     label: action,
+    accelerator: accelerator(action),
+    registerAccelerator: false,
     click: () => sendMenuAction(window, action)
   })
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
     {
-      label: mt('文件'),
+      label: mt('file'),
       submenu: [
-        { ...command('newProject'), label: mt('新建'), accelerator: 'CmdOrCtrl+N' },
-        { ...command('openProject'), label: mt('打开项目…'), accelerator: 'CmdOrCtrl+O' },
         {
-          label: mt('最近项目'),
+          ...command('newProject'),
+          label: mt('new'),
+          accelerator: 'CmdOrCtrl+N',
+          registerAccelerator: true
+        },
+        { ...command('openProject'), label: mt('open_project_dialog') },
+        {
+          label: mt('recent_projects'),
           submenu: recent.length
             ? recent.map((item) => ({
                 label: item.name,
                 click: () => sendMenuAction(window, `openRecent:${item.path}`)
               }))
-            : [{ label: mt('暂无最近项目'), enabled: false }]
+            : [{ label: mt('no_recent_projects_alternate'), enabled: false }]
         },
         { type: 'separator' },
-        { ...command('renameProject'), label: mt('重命名项目…') },
-        { ...command('closeProject'), label: mt('关闭项目'), accelerator: 'CmdOrCtrl+W' },
-        { ...command('saveProject'), label: mt('保存'), accelerator: 'CmdOrCtrl+S' },
-        { ...command('saveHistory'), label: mt('查看保存记录') },
+        { ...command('renameProject'), label: mt('rename_project_dialog') },
+        {
+          ...command('closeProject'),
+          label: mt('close_project'),
+          accelerator: 'CmdOrCtrl+W',
+          registerAccelerator: true
+        },
+        { ...command('saveProject'), label: mt('save') },
+        { ...command('saveHistory'), label: mt('view_save_history') },
         { type: 'separator' },
-        { ...command('selectAudio'), label: mt('导入歌曲…'), accelerator: 'CmdOrCtrl+Shift+O' },
-        { ...command('importLyrics'), label: mt('导入歌词…'), accelerator: 'CmdOrCtrl+I' },
-        { ...command('exportLyrics'), label: mt('导出…'), accelerator: 'CmdOrCtrl+E' }
+        { ...command('selectAudio'), label: mt('import_audio_dialog') },
+        { ...command('importLyrics'), label: mt('import_lyrics_dialog') },
+        { ...command('exportLyrics'), label: mt('export_dialog') }
       ]
     },
     {
-      label: mt('编辑'),
+      label: mt('edit'),
       submenu: [
-        { ...command('undo'), label: mt('撤销'), accelerator: 'CmdOrCtrl+Z' },
-        { ...command('redo'), label: mt('重做'), accelerator: 'CmdOrCtrl+Shift+Z' },
+        { ...command('undo'), label: mt('undo') },
+        { ...command('redo'), label: mt('redo') },
+        { type: 'separator' },
+        { role: 'cut', label: mt('cut') },
+        { role: 'copy', label: mt('copy') },
+        { role: 'paste', label: mt('paste') },
+        { role: 'selectAll', label: mt('select_all') },
         { type: 'separator' },
         {
-          label: mt('播放与打轴'),
+          label: mt('playback_timing'),
           submenu: [
-            { ...command('playPause'), label: mt('播放 / 暂停') },
-            { ...command('markToken'), label: mt('记录当前 Token') },
-            { ...command('automaticTiming'), label: mt('智能打轴') },
-            { ...command('toggleLoop'), label: mt('切换 Loop') },
-            { ...command('toggleLyricsFollow'), label: mt('切换歌词跟随') },
-            { ...command('toggleTimelineFollow'), label: mt('切换时间轴跟随') }
+            { ...command('playPause'), label: mt('play_pause') },
+            { ...command('markToken'), label: mt('mark_current_token') },
+            { ...command('automaticTiming'), label: mt('auto_timing') },
+            { ...command('toggleLoop'), label: mt('toggle_loop') },
+            { ...command('toggleLyricsFollow'), label: mt('toggle_lyrics_follow') },
+            { ...command('toggleTimelineFollow'), label: mt('toggle_timeline_follow') }
           ]
         },
         {
-          label: mt('导航与微调'),
+          label: mt('navigation_nudge'),
           submenu: [
-            { ...command('previousToken'), label: mt('上一个 Token') },
-            { ...command('nextToken'), label: mt('下一个 Token') },
-            { ...command('previousLine'), label: mt('上一句') },
-            { ...command('nextLine'), label: mt('下一句') },
-            { ...command('locateToken'), label: mt('定位选中 Token') },
-            { ...command('nudgeEarlierFine'), label: mt('向前微调 1 ms') },
-            { ...command('nudgeLaterFine'), label: mt('向后微调 1 ms') },
-            { ...command('nudgeEarlierCoarse'), label: mt('向前微调 50 ms') },
-            { ...command('nudgeLaterCoarse'), label: mt('向后微调 50 ms') }
+            { ...command('previousToken'), label: mt('previous_token') },
+            { ...command('nextToken'), label: mt('next_token') },
+            { ...command('previousLine'), label: mt('previous_line') },
+            { ...command('nextLine'), label: mt('next_line') },
+            { ...command('locateToken'), label: mt('locate_selected_token') },
+            { ...command('nudgeEarlierFine'), label: mt('nudge_earlier_1_ms') },
+            { ...command('nudgeLaterFine'), label: mt('nudge_later_1_ms') },
+            { ...command('nudgeEarlierCoarse'), label: mt('nudge_earlier_50_ms') },
+            { ...command('nudgeLaterCoarse'), label: mt('nudge_later_50_ms') }
           ]
         },
         {
-          label: mt('复制与 Token 结构'),
+          label: mt('copy_token_structure'),
           submenu: [
-            { ...command('copyLineTiming'), label: mt('复制整句时间') },
-            { ...command('pasteLineTiming'), label: mt('粘贴整句时间') },
-            { ...command('focusTokenSplit'), label: mt('拆分 Token') },
-            { ...command('mergePreviousToken'), label: mt('合并前一个 Token') },
-            { ...command('mergeNextToken'), label: mt('合并下一个 Token') }
+            { ...command('copyLineTiming'), label: mt('copy_line_timing') },
+            { ...command('pasteLineTiming'), label: mt('paste_line_timing') },
+            { ...command('preprocessLyrics'), label: mt('lyrics_preprocessing') },
+            { ...command('focusTokenSplit'), label: mt('split_token') },
+            { ...command('mergePreviousToken'), label: mt('merge_previous_token') },
+            { ...command('mergeNextToken'), label: mt('merge_next_token') }
           ]
         },
         {
-          label: mt('时间轴'),
+          label: mt('timeline'),
           submenu: [
-            { ...command('tokenEditMode'), label: mt('Token 编辑模式') },
-            { ...command('lineEditMode'), label: mt('整句编辑模式') },
-            { ...command('toggleAdjacentLock'), label: mt('切换相邻锁定') },
-            { ...command('zoomOut'), label: mt('缩小时间轴') },
-            { ...command('zoomIn'), label: mt('放大时间轴') },
-            { ...command('fitTimeline'), label: mt('适合时间轴') }
+            { ...command('tokenEditMode'), label: mt('token_edit_mode') },
+            { ...command('lineEditMode'), label: mt('line_edit_mode') },
+            { ...command('toggleAdjacentLock'), label: mt('toggle_adjacent_lock') },
+            { ...command('zoomOut'), label: mt('zoom_out') },
+            { ...command('zoomIn'), label: mt('zoom_in') },
+            { ...command('fitTimeline'), label: mt('fit_timeline') }
           ]
         },
         { type: 'separator' },
-        { ...command('settings'), label: mt('快捷键与设置…'), accelerator: 'CmdOrCtrl+,' }
+        {
+          ...command('settings'),
+          label: mt('shortcuts_settings'),
+          accelerator: 'CmdOrCtrl+,',
+          registerAccelerator: true
+        }
       ]
     },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    {
+      label: mt('help'),
+      role: 'help',
+      submenu: [{ label: `${mt('version')} ${app.getVersion()}`, enabled: false }]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

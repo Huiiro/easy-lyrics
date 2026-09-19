@@ -11,15 +11,33 @@ const desktopApi: DesktopApi = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.menuAction, handler)
   },
   ping: () => ipcRenderer.invoke(IPC_CHANNELS.ping) as Promise<string>,
+  getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appVersion),
   selectAudio: () => ipcRenderer.invoke(IPC_CHANNELS.selectAudio),
   registerAudio: (path) => ipcRenderer.invoke(IPC_CHANNELS.registerAudio, path),
-  saveProject: (project, path) => ipcRenderer.invoke(IPC_CHANNELS.saveProject, project, path),
+  saveProject: (project, path, windowSessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.saveProject, project, path, windowSessionId),
   openProject: () => ipcRenderer.invoke(IPC_CHANNELS.openProject),
-  autosaveProject: (project) => ipcRenderer.invoke(IPC_CHANNELS.autosaveProject, project),
+  autosaveProject: (project, windowSessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.autosaveProject, project, windowSessionId),
   loadAutosave: () => ipcRenderer.invoke(IPC_CHANNELS.loadAutosave),
+  clearAutosave: (projectId, windowSessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.clearAutosave, projectId, windowSessionId),
+  listSaveHistory: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.listSaveHistory, projectId),
+  loadSaveHistoryEntry: (projectId, entryId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.loadSaveHistoryEntry, projectId, entryId),
   listRecentProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listRecentProjects),
   openRecentProject: (path) => ipcRenderer.invoke(IPC_CHANNELS.openRecentProject, path),
   loadLastProject: () => ipcRenderer.invoke(IPC_CHANNELS.loadLastProject),
+  createProjectWindow: () => ipcRenderer.invoke(IPC_CHANNELS.createProjectWindow),
+  openProjectInNewWindow: () => ipcRenderer.invoke(IPC_CHANNELS.openProjectInNewWindow),
+  openRecentProjectInNewWindow: (path) =>
+    ipcRenderer.invoke(IPC_CHANNELS.openRecentProjectInNewWindow, path),
+  takeWindowLaunch: () => ipcRenderer.invoke(IPC_CHANNELS.takeWindowLaunch),
+  onRecentProjectsChanged: (listener) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC_CHANNELS.recentProjectsChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.recentProjectsChanged, handler)
+  },
   setProjectDirty: (dirty) => ipcRenderer.send(IPC_CHANNELS.setProjectDirty, dirty),
   onAppCloseRequested: (listener) => {
     const handler = (): void => listener()
@@ -33,6 +51,7 @@ const desktopApi: DesktopApi = {
   saveExportTemplates: (templates) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveExportTemplates, templates),
   setLocale: (locale) => ipcRenderer.invoke(IPC_CHANNELS.setLocale, locale),
+  setShortcuts: (shortcuts) => ipcRenderer.send(IPC_CHANNELS.setShortcuts, shortcuts),
   takePendingIntegration: () => ipcRenderer.invoke(IPC_CHANNELS.integrationTakePending),
   onIntegrationOpen: (listener) => {
     const handler = (
