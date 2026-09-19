@@ -54,11 +54,11 @@ jobs:
             artifact: linux
     runs-on: ${{ matrix.os }}
     env:
-      CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      SIGN_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
+      SIGN_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
+      NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+      NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,6 +67,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:app
+      - name: Configure available signing credentials
+        shell: bash
+        run: |
+          if [ -n "$SIGN_LINK" ]; then
+            echo "CSC_LINK=$SIGN_LINK" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$SIGN_PASSWORD" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.target }}" = "mac" ] && [ -n "$NOTARY_APPLE_ID" ]; then
+            echo "APPLE_ID=$NOTARY_APPLE_ID" >> "$GITHUB_ENV"
+            echo "APPLE_APP_SPECIFIC_PASSWORD=$NOTARY_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$NOTARY_TEAM_ID" >> "$GITHUB_ENV"
+          fi
       - name: Package application
         shell: bash
         run: |
