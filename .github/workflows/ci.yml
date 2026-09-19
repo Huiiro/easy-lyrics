@@ -115,26 +115,35 @@ jobs:
         if: matrix.target == 'win'
         shell: pwsh
         run: |
-          $installer = Get-ChildItem "dist/*-windows-x64.exe" | Select-Object -First 1
-          if (-not $installer) {
-            throw "Windows installer was not generated"
+          $ErrorActionPreference = "Stop"
+          try {
+            $installer = Get-ChildItem "dist/*-windows-x64.exe" | Select-Object -First 1
+            if (-not $installer) {
+              throw "Windows installer was not generated"
+            }
+            $installDir = Join-Path $env:RUNNER_TEMP "Lyric Timeline Installed"
+            $installerArguments = "/S /D=$installDir"
+            $installerProcess = Start-Process $installer.FullName -ArgumentList $installerArguments -PassThru -Wait
+            if ($installerProcess.ExitCode -ne 0) {
+              throw "Installer exited with code $($installerProcess.ExitCode)"
+            }
+            $installedExecutable = Join-Path $installDir "lyric-timeline.exe"
+            if (-not (Test-Path $installedExecutable)) {
+              $installedFiles = (Get-ChildItem $installDir -Recurse -File | Select-Object -ExpandProperty FullName) -join ", "
+              throw "Installed application executable was not found. Files: $installedFiles"
+            }
+            $userDataDir = Join-Path $env:RUNNER_TEMP "lyric-timeline-smoke"
+            $process = Start-Process $installedExecutable -ArgumentList "--user-data-dir=$userDataDir" -PassThru
+            Start-Sleep -Seconds 10
+            if ($process.HasExited) {
+              throw "Installed application exited unexpectedly with code $($process.ExitCode)"
+            }
+            Stop-Process -Id $process.Id -Force
+          } catch {
+            $message = $_.Exception.Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows installed smoke test failed::$message"
+            throw
           }
-          $installDir = Join-Path $env:RUNNER_TEMP "Lyric Timeline Installed"
-          $installerProcess = Start-Process $installer.FullName -ArgumentList "/S", "/D=$installDir" -PassThru -Wait
-          if ($installerProcess.ExitCode -ne 0) {
-            throw "Installer exited with code $($installerProcess.ExitCode)"
-          }
-          $installedExecutable = Join-Path $installDir "lyric-timeline.exe"
-          if (-not (Test-Path $installedExecutable)) {
-            throw "Installed application executable was not found"
-          }
-          $userDataDir = Join-Path $env:RUNNER_TEMP "lyric-timeline-smoke"
-          $process = Start-Process $installedExecutable -ArgumentList "--user-data-dir=$userDataDir" -PassThru
-          Start-Sleep -Seconds 10
-          if ($process.HasExited) {
-            throw "Packaged application exited unexpectedly with code $($process.ExitCode)"
-          }
-          Stop-Process -Id $process.Id -Force
       - uses: actions/upload-artifact@v4
         with:
           name: lyric-timeline-${{ matrix.artifact }}
