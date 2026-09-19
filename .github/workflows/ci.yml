@@ -67,7 +67,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:app
-      - run: npx electron-builder --${{ matrix.target }} ${{ matrix.args }} --publish never
+      - name: Package application
+        shell: bash
+        run: |
+          set +e
+          npx electron-builder --${{ matrix.target }} ${{ matrix.args }} --publish never 2>&1 | tee electron-builder.log
+          build_status=${PIPESTATUS[0]}
+          if [ "$build_status" -ne 0 ]; then
+            message="$(tail -80 electron-builder.log)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\r'/'%0D'}"
+            message="${message//$'\n'/'%0A'}"
+            echo "::error title=electron-builder failed::$message"
+          fi
+          exit "$build_status"
       - name: Verify macOS application signatures
         if: matrix.target == 'mac'
         run: |
