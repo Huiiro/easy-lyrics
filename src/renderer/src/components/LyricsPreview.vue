@@ -14,6 +14,7 @@ interface PreviewCharacter {
   text: string
   start: number | null
   end: number | null
+  previousEnd: number | null
   index: number
 }
 
@@ -21,6 +22,7 @@ const displayLines = computed(() =>
   projectStore.project.lines.map((line) => {
     const texts = lyricTokenDisplayTexts(line)
     let characterIndex = 0
+    let previousEnd: number | null = null
     const groups = line.tokens.map((token, tokenIndex) => {
       const characters = segmentGraphemes(texts[tokenIndex] ?? token.text)
       const start = token.start
@@ -33,8 +35,10 @@ const displayLines = computed(() =>
           text,
           start: start === null ? null : start + stride * index,
           end: start === null ? null : start + stride * (index + 1),
+          previousEnd,
           index: characterIndex
         }
+        previousEnd = character.end
         characterIndex += 1
         return character
       })
@@ -86,18 +90,18 @@ function waveCenter(groups: PreviewCharacter[][]): number {
   return center
 }
 
-function characterStyle(
-  character: PreviewCharacter,
-  groups: PreviewCharacter[][]
-): Record<string, string> {
+const currentWaveCenter = computed(() => {
+  const groups = displayLines.value[currentLineIndex.value]?.groups
+  return groups ? waveCenter(groups) : -1
+})
+
+function characterStyle(character: PreviewCharacter, center: number): Record<string, string> {
   const progress = tokenProgress(character.start, character.end)
-  const characters = groups.flat()
-  const previous = characters[character.index - 1]
   const duration = Math.max(0.001, (character.end ?? 0) - (character.start ?? 0))
   const gap =
-    character.start === null || previous?.end == null
+    character.start === null || character.previousEnd === null
       ? Number.POSITIVE_INFINITY
-      : character.start - previous.end
+      : character.start - character.previousEnd
   const blend =
     character.index > 0 && gap <= 0.08 ? Math.min(0.12, Math.max(duration * 0.55, gap + 0.04)) : 0
   const emphasisStart = character.start === null ? null : character.start - blend
@@ -105,7 +109,7 @@ function characterStyle(
     emphasisStart === null
       ? progress
       : Math.min(1, Math.max(0, (playerStore.currentTime - emphasisStart) / (duration + blend)))
-  const distance = character.index - waveCenter(groups)
+  const distance = character.index - center
   const width = distance < 0 ? 1.9 : 0.82
   const lift = distance <= -5 || distance > 3 ? 0 : Math.exp(-0.5 * (distance / width) ** 2)
   const edgeEnvelope = Math.max(0, Math.min(1, progress / 0.18, (1 - progress) / 0.18))
@@ -152,7 +156,7 @@ watch(currentLineIndex, async (index) => {
           v-for="character in group"
           :key="character.index"
           class="preview-character"
-          :style="lineIndex === currentLineIndex ? characterStyle(character, groups) : undefined"
+          :style="lineIndex === currentLineIndex ? characterStyle(character, currentWaveCenter) : undefined"
         >{{ character.text }}</span></span>
       </button>
     </div>

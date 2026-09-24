@@ -106,7 +106,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function setAudioDuration(duration: number): void {
-    if (!project.value.audio) return
+    if (!project.value.audio || project.value.audio.duration === duration) return
     project.value.audio.duration = duration
     project.value.updatedAt = Date.now()
   }

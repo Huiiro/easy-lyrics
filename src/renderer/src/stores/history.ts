@@ -7,6 +7,8 @@ export interface Command {
   undo: () => void
 }
 
+export const MAX_HISTORY_ENTRIES = 500
+
 export const useHistoryStore = defineStore('history', () => {
   const undoStack = ref<Command[]>([])
   const redoStack = ref<Command[]>([])
@@ -22,6 +24,7 @@ export const useHistoryStore = defineStore('history', () => {
 
   function recordExecuted(command: Command): void {
     undoStack.value.push(command)
+    if (undoStack.value.length > MAX_HISTORY_ENTRIES) undoStack.value.shift()
     redoStack.value = []
   }
 

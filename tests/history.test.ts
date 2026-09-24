@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useHistoryStore } from '../src/renderer/src/stores/history'
+import { MAX_HISTORY_ENTRIES, useHistoryStore } from '../src/renderer/src/stores/history'
 
 describe('command history', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -30,5 +30,19 @@ describe('command history', () => {
     history.undo()
     history.recordExecuted(command)
     expect(history.canRedo).toBe(false)
+  })
+
+  it('bounds stored commands while preserving the newest undo actions', () => {
+    const history = useHistoryStore()
+    const undone: number[] = []
+    for (let index = 0; index < MAX_HISTORY_ENTRIES + 2; index++) {
+      history.recordExecuted({ label: String(index), execute: () => {}, undo: () => undone.push(index) })
+    }
+
+    expect(history.undoDepth).toBe(MAX_HISTORY_ENTRIES)
+    for (let index = 0; index < MAX_HISTORY_ENTRIES; index++) history.undo()
+    expect(undone[0]).toBe(MAX_HISTORY_ENTRIES + 1)
+    expect(undone.at(-1)).toBe(2)
+    expect(history.canUndo).toBe(false)
   })
 })

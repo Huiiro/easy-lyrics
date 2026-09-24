@@ -47,6 +47,17 @@ describe('project store lyric selection', () => {
     expect(store.activeToken?.id).toBe('token-3')
   })
 
+  it('does not rewrite project metadata for repeated audio duration updates', () => {
+    const store = useProjectStore()
+    store.setAudio({ path: 'song.mp3', name: 'song.mp3', duration: null })
+    store.setAudioDuration(12.5)
+    expect(store.project.audio?.duration).toBe(12.5)
+
+    store.project.updatedAt = 123
+    store.setAudioDuration(12.5)
+    expect(store.project.updatedAt).toBe(123)
+  })
+
   it('clears the token selection without losing the current lyric line', () => {
     const store = useProjectStore()
     store.importLyrics(lines, 'smart')

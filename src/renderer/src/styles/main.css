@@ -739,6 +739,7 @@ button {
   transform: none;
   opacity: 1;
   scale: none;
+  will-change: auto;
 }
 .lyrics-preview-empty {
   display: flex;
@@ -1265,6 +1266,11 @@ button {
 }
 .timeline-canvas-wrap canvas:active {
   cursor: grabbing;
+}
+.timeline-canvas-wrap .timeline-playhead {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 .timeline-empty {
   position: absolute;

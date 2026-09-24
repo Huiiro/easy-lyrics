@@ -1,5 +1,6 @@
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 
@@ -249,11 +250,6 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ])
-
-// Some Windows graphics drivers terminate Electron before the first window is
-// shown. This editor does not rely on GPU rendering, so prefer a reliable
-// software-rendered startup on Windows.
-if (process.platform === 'win32') app.disableHardwareAcceleration()
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
@@ -538,7 +534,10 @@ function createWindow(launchPayload?: WindowLaunchPayload): BrowserWindow {
 
   if (isMac) void installMacMenu(mainWindow)
 
-  mainWindow.once('ready-to-show', () => mainWindow.show())
+  const showWindow = (): void => {
+    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show()
+  }
+  mainWindow.once('ready-to-show', showWindow)
   mainWindow.on('close', (event) => {
     if (!dirtyWindows.get(mainWindow.webContents.id)) return
     event.preventDefault()
@@ -554,11 +553,14 @@ function createWindow(launchPayload?: WindowLaunchPayload): BrowserWindow {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  const loading =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+      : mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  void loading.then(showWindow).catch((error: unknown) => {
+    console.error('Unable to load the main window', error)
+    showWindow()
+  })
   return mainWindow
 }
 
@@ -699,10 +701,24 @@ async function installMacMenu(window: BrowserWindow): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+// Keep the development instance separate from an installed copy of the app.
+// The single-instance lock is scoped to the user data directory on Windows.
+if (is.dev) {
+  const devUserData = join(app.getPath('appData'), `${app.getName()}-dev`)
+  mkdirSync(devUserData, { recursive: true })
+  app.setPath('userData', devUserData)
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
 
 app.on('second-instance', (_event, argv) => {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (window) {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
   const url = integrationUrlFromArgs(argv)
   if (url) void acceptIntegrationUrl(url)
 })

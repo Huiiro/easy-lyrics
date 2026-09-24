@@ -24,6 +24,7 @@ import { MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from '@renderer/timeline
 import type { LyricProject } from '@shared/models/project'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
+const playheadCanvas = ref<HTMLCanvasElement | null>(null)
 const container = ref<HTMLElement | null>(null)
 const canvasHeight = ref(190)
 
@@ -97,6 +98,8 @@ const canMergeSelection = computed(() => {
 })
 
 let resizeObserver: ResizeObserver | null = null
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+let measuredCanvasSize = false
 let waveformAbort: AbortController | null = null
 let renderer: TimelineRenderer | null = null
 
@@ -618,29 +621,33 @@ watch(
 
 watchEffect(() => {
   const element = canvas.value
-  if (!element) return
+  const overlay = playheadCanvas.value
+  if (!element || !overlay) return
   const context = element.getContext('2d')
-  if (!context) return
+  const playheadContext = overlay.getContext('2d')
+  if (!context || !playheadContext) return
 
   const ratio = window.devicePixelRatio || 1
   const width = timelineStore.width
-  if (
-    element.width !== Math.round(width * ratio) ||
-    element.height !== Math.round(canvasHeight.value * ratio)
-  ) {
-    element.width = Math.round(width * ratio)
-    element.height = Math.round(canvasHeight.value * ratio)
-    element.style.width = `${width}px`
-    element.style.height = `${canvasHeight.value}px`
+  for (const target of [element, overlay]) {
+    if (
+      target.width !== Math.round(width * ratio) ||
+      target.height !== Math.round(canvasHeight.value * ratio)
+    ) {
+      target.width = Math.round(width * ratio)
+      target.height = Math.round(canvasHeight.value * ratio)
+      target.style.width = `${width}px`
+      target.style.height = `${canvasHeight.value}px`
+    }
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0)
+  playheadContext.setTransform(ratio, 0, 0, ratio, 0, 0)
 
-  renderer ??= new TimelineRenderer(context)
-  renderer.draw({
+  renderer ??= new TimelineRenderer(context, playheadContext)
+  renderer.drawStatic({
     viewport: timelineStore.viewport,
     height: canvasHeight.value,
     duration: duration(),
-    currentTime: playerStore.currentTime,
     waveform: timelineStore.waveform,
     lines: projectStore.project.lines,
     activeTokenId: projectStore.activeToken?.id ?? null,
@@ -652,13 +659,41 @@ watchEffect(() => {
   })
 })
 
+watchEffect(() => {
+  if (!canvas.value || !playheadCanvas.value || !renderer) return
+  renderer.drawPlayhead({
+    viewport: timelineStore.viewport,
+    height: canvasHeight.value,
+    currentTime: playerStore.currentTime
+  })
+})
+
 onMounted(() => {
   window.addEventListener('pointerdown', dismissContextMenu)
   if (!container.value) return
   resizeObserver = new ResizeObserver(([entry]) => {
     if (entry) {
-      timelineStore.setWidth(entry.contentRect.width, duration())
-      canvasHeight.value = Math.max(120, entry.contentRect.height)
+      const width = entry.contentRect.width
+      const height = Math.max(120, entry.contentRect.height)
+      for (const target of [canvas.value, playheadCanvas.value]) {
+        if (!target) continue
+        target.style.width = `${width}px`
+        target.style.height = `${height}px`
+      }
+      const applySize = (): void => {
+        timelineStore.setWidth(width, duration())
+        canvasHeight.value = height
+      }
+      if (!measuredCanvasSize) {
+        measuredCanvasSize = true
+        applySize()
+      } else {
+        if (resizeTimer) clearTimeout(resizeTimer)
+        resizeTimer = setTimeout(() => {
+          resizeTimer = null
+          applySize()
+        }, 120)
+      }
     }
   })
   resizeObserver.observe(container.value)
@@ -667,6 +702,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('pointerdown', dismissContextMenu)
   resizeObserver?.disconnect()
+  if (resizeTimer) clearTimeout(resizeTimer)
   waveformAbort?.abort()
 })
 </script>
@@ -765,6 +801,7 @@ onUnmounted(() => {
         @wheel.prevent="handleWheel"
         @contextmenu.prevent="handleContextMenu"
       />
+      <canvas ref="playheadCanvas" class="timeline-playhead" aria-hidden="true" />
       <div v-if="!playerStore.source" class="timeline-empty">
         {{ t('import_audio_to_display_the_waveform_and_timeline') }}
       </div>
